@@ -132,6 +132,7 @@ function Dashboard({lang}:{lang:Lang}) {
   }
   if(loading)return <div className="auth-page"><div className="auth-card">OLYMPUS · {kk?"Жүктелуде…":"Загрузка…"}</div></div>;
   if(!user)return <div className="auth-page"><div className="auth-card"><h1>{kk?"Жүйеге кіріңіз":"Войдите в систему"}</h1><Link className="btn btn-primary" to="/login">{kk?"Кіру":"Войти"}</Link></div></div>;
+  if(role==="school_admin")return <Navigate to="/school" replace/>;
   if(role!=="super_admin")return <div className="auth-page"><div className="auth-card"><h1>{kk?"Қолжетімділік шектеулі":"Нет доступа"}</h1><p>{kk?"Бұл аккаунтқа Super Admin рөлі берілмеген.":"У этой учётной записи нет роли Super Admin."}</p><button className="btn btn-ghost" onClick={()=>signOut(auth!)}>{kk?"Шығу":"Выйти"}</button></div></div>;
   const pending=apps.filter(a=>(a.status||"pending")==="pending");
   const activeSchools=schools.filter(s=>s.status==="active");
@@ -165,4 +166,82 @@ function Dashboard({lang}:{lang:Lang}) {
   </div></div>;
 }
 
-export default function App(){const [lang,setLang]=useState<Lang>("kk");return <Routes><Route path="/login" element={<Login lang={lang}/>}/><Route path="/dashboard" element={<Dashboard lang={lang}/>}/><Route path="*" element={<Landing lang={lang} setLang={setLang}/>}/></Routes>}
+
+
+type SchoolMember = { id:string; displayName?:string; fullName?:string; email?:string; grade?:string; className?:string; subject?:string; status?:string };
+type SchoolClass = { id:string; name?:string; grade?:string; academicYear?:string; studentCount?:number };
+function SchoolAdmin({lang}:{lang:Lang}) {
+  const [user,setUser]=useState<User|null>(null);
+  const [schoolId,setSchoolId]=useState("");
+  const [schoolName,setSchoolName]=useState("");
+  const [loading,setLoading]=useState(true);
+  const [tab,setTab]=useState("overview");
+  const [classes,setClasses]=useState<SchoolClass[]>([]);
+  const [teachers,setTeachers]=useState<SchoolMember[]>([]);
+  const [students,setStudents]=useState<SchoolMember[]>([]);
+  const [message,setMessage]=useState("");
+  const [className,setClassName]=useState("");
+  const [grade,setGrade]=useState("5");
+  const [studentForm,setStudentForm]=useState({fullName:"",grade:"5",className:""});
+  const [teacherForm,setTeacherForm]=useState({email:"",subject:""});
+  const kk=lang==="kk";
+  const labels=kk?{overview:"Шолу",classes:"Сыныптар",teachers:"Мұғалімдер",students:"Оқушылар"}:{overview:"Обзор",classes:"Классы",teachers:"Учителя",students:"Ученики"};
+  async function reload(sid:string){
+    if(!db)return;
+    const [c,t,s]=await Promise.all([
+      getDocs(collection(db,"schools",sid,"classes")),
+      getDocs(collection(db,"schools",sid,"teacherInvites")),
+      getDocs(collection(db,"schools",sid,"students"))
+    ]);
+    setClasses(c.docs.map(d=>({id:d.id,...d.data()} as SchoolClass)));
+    setTeachers(t.docs.map(d=>({id:d.id,...d.data()} as SchoolMember)));
+    setStudents(s.docs.map(d=>({id:d.id,...d.data()} as SchoolMember)));
+  }
+  useEffect(()=>{
+    if(!auth||!db){setLoading(false);return;}
+    const unsub=onAuthStateChanged(auth,async current=>{
+      setUser(current);
+      if(!current){setLoading(false);return;}
+      try{
+        const p=await getDoc(doc(db,"users",current.uid));
+        if(!p.exists()||p.data().role!=="school_admin"||!p.data().schoolId){setSchoolId("");setLoading(false);return;}
+        const sid=String(p.data().schoolId);setSchoolId(sid);
+        const school=await getDoc(doc(db,"schools",sid));
+        setSchoolName(school.exists()?String(school.data().name||""):"");
+        await reload(sid);
+      }catch{setMessage(kk?"Деректерді жүктеу қатесі.":"Ошибка загрузки данных.");}
+      finally{setLoading(false);}
+    });
+    return ()=>unsub();
+  },[kk]);
+  async function addClass(e:React.FormEvent){
+    e.preventDefault();if(!db||!schoolId)return;
+    try{await addDoc(collection(db,"schools",schoolId,"classes"),{name:className.trim(),grade:Number(grade),academicYear:"2026–2027",studentCount:0,createdAt:serverTimestamp(),createdBy:user?.uid||""});setClassName("");await reload(schoolId);setMessage(kk?"Сынып қосылды.":"Класс добавлен.");}
+    catch{setMessage(kk?"Сыныпты қосу мүмкін болмады.":"Не удалось добавить класс.");}
+  }
+  async function addStudent(e:React.FormEvent){
+    e.preventDefault();if(!db||!schoolId)return;
+    try{await addDoc(collection(db,"schools",schoolId,"students"),{...studentForm,grade:Number(studentForm.grade),status:"pending_account",createdAt:serverTimestamp(),createdBy:user?.uid||""});setStudentForm({fullName:"",grade:"5",className:""});await reload(schoolId);setMessage(kk?"Оқушы тізімге қосылды. Аккаунтын кейін шақыру арқылы ашуға болады.":"Ученик добавлен в список. Аккаунт можно будет создать через приглашение.");}
+    catch{setMessage(kk?"Оқушыны қосу мүмкін болмады.":"Не удалось добавить ученика.");}
+  }
+  async function inviteTeacher(e:React.FormEvent){
+    e.preventDefault();if(!db||!schoolId)return;
+    try{await addDoc(collection(db,"schools",schoolId,"teacherInvites"),{email:teacherForm.email.trim().toLowerCase(),subject:teacherForm.subject,status:"pending",createdAt:serverTimestamp(),createdBy:user?.uid||""});setTeacherForm({email:"",subject:""});await reload(schoolId);setMessage(kk?"Мұғалімге шақыру жазбасы жасалды. Аккаунт ашу үшін серверлік шақыру қажет.":"Запись приглашения создана. Для создания аккаунта требуется серверное приглашение.");}
+    catch{setMessage(kk?"Шақыруды сақтау мүмкін болмады.":"Не удалось сохранить приглашение.");}
+  }
+  if(loading)return <div className="auth-page"><div className="auth-card">{kk?"Жүктелуде…":"Загрузка…"}</div></div>;
+  if(!user)return <div className="auth-page"><div className="auth-card"><h1>{kk?"Жүйеге кіріңіз":"Войдите в систему"}</h1><Link className="btn btn-primary" to="/login">{kk?"Кіру":"Войти"}</Link></div></div>;
+  if(!schoolId)return <div className="auth-page"><div className="auth-card"><h1>{kk?"Мектеп әкімшісіне қолжетімділік жоқ":"Нет доступа администратора школы"}</h1><p>{kk?"Аккаунтыңызға мектеп әкімшісі рөлі мен schoolId тағайындалуы керек.":"Аккаунту нужно назначить роль school_admin и schoolId."}</p><button className="btn btn-ghost" onClick={()=>auth&&signOut(auth)}>{kk?"Шығу":"Выйти"}</button></div></div>;
+  return <div className="auth-page"><div className="dashboard-shell">
+    <header className="dashboard-head"><Link className="brand" to="/"><span className="brand-mark"><Trophy/></span><span>OLYMPUS<small>SCHOOL ADMIN</small></span></Link><button className="btn btn-ghost" onClick={()=>auth&&signOut(auth)}>{kk?"Шығу":"Выйти"}</button></header>
+    <div className="dashboard-title"><div><span className="section-kicker">OLYMPUS · SCHOOL SPACE</span><h1>{schoolName|| (kk?"Мектеп кабинеті":"Кабинет школы")}</h1><p>{user.email}</p></div><div className="dashboard-stat"><strong>{classes.length}</strong><span>{kk?"Сыныптар":"Классы"}</span></div><div className="dashboard-stat"><strong>{teachers.length}</strong><span>{kk?"Мұғалімдер":"Учителя"}</span></div><div className="dashboard-stat"><strong>{students.length}</strong><span>{kk?"Оқушылар":"Ученики"}</span></div></div>
+    <nav className="admin-tabs">{(["overview","classes","teachers","students"] as const).map(k=><button key={k} className={tab===k?"active":""} onClick={()=>setTab(k)}>{labels[k]}</button>)}</nav>
+    {message&&<p className="dashboard-message">{message}</p>}
+    {tab==="overview"&&<section className="admin-grid"><article className="admin-module"><span className="section-kicker">01 · CLASSES</span><h2>{labels.classes}</h2><strong>{classes.length}</strong><p>{kk?"Мектеп сыныптары":"Учебные классы школы"}</p><button className="btn btn-primary" onClick={()=>setTab("classes")}>{kk?"Ашу":"Открыть"} <ArrowRight size={15}/></button></article><article className="admin-module"><span className="section-kicker">02 · TEACHERS</span><h2>{labels.teachers}</h2><strong>{teachers.length}</strong><p>{kk?"Мұғалім шақырулары":"Приглашения учителей"}</p><button className="btn btn-primary" onClick={()=>setTab("teachers")}>{kk?"Ашу":"Открыть"} <ArrowRight size={15}/></button></article><article className="admin-module"><span className="section-kicker">03 · STUDENTS</span><h2>{labels.students}</h2><strong>{students.length}</strong><p>{kk?"Оқушылар тізімі":"Список учеников"}</p><button className="btn btn-primary" onClick={()=>setTab("students")}>{kk?"Ашу":"Открыть"} <ArrowRight size={15}/></button></article></section>}
+    {tab==="classes"&&<section className="dashboard-panel"><div className="dashboard-panel-head"><div><h2>{kk?"Сыныптар":"Классы"}</h2><p>{kk?"Мектептің оқу сыныптарын құрыңыз.":"Создавайте учебные классы школы."}</p></div></div><form className="admin-form" onSubmit={addClass}><label>{kk?"Сынып атауы":"Название класса"}<input required placeholder="5 «А»" value={className} onChange={e=>setClassName(e.target.value)}/></label><label>{kk?"Сынып деңгейі":"Параллель"}<select value={grade} onChange={e=>setGrade(e.target.value)}>{Array.from({length:11},(_,i)=>String(i+1)).map(v=><option key={v}>{v}</option>)}</select></label><button className="btn btn-primary">{kk?"Сынып қосу":"Добавить класс"}</button></form><div className="application-list" style={{marginTop:22}}>{classes.length?classes.map(c=><article className="application-item" key={c.id}><div className="application-info"><h3>{c.name}</h3><p>{c.grade} {kk?"сынып":"класс"} · {c.academicYear}</p></div><span className="status-pill approved">{c.studentCount||0} {kk?"оқушы":"учеников"}</span></article>):<div className="empty-state">{kk?"Сыныптар әлі қосылмаған.":"Классы пока не добавлены."}</div>}</div></section>}
+    {tab==="teachers"&&<div className="admin-stack"><section className="dashboard-panel"><div className="dashboard-panel-head"><div><h2>{kk?"Мұғалімді шақыру":"Пригласить учителя"}</h2><p>{kk?"Мұғалімнің email мекенжайын және пәнін енгізіңіз.":"Укажите email учителя и предмет."}</p></div></div><form className="admin-form" onSubmit={inviteTeacher}><label>Email<input required type="email" value={teacherForm.email} onChange={e=>setTeacherForm({...teacherForm,email:e.target.value})}/></label><label>{kk?"Пәні":"Предмет"}<input required value={teacherForm.subject} onChange={e=>setTeacherForm({...teacherForm,subject:e.target.value})}/></label><button className="btn btn-primary">{kk?"Шақыру жазбасын жасау":"Создать приглашение"}</button></form><p className="admin-notice">{kk?"Бұл әзірге шақыру жазбасы. Firebase Auth аккаунтын ашу және email жіберу қауіпсіз серверлік функцияда іске асырылады.":"Пока это запись приглашения. Создание Firebase Auth аккаунта и отправка email выполняются безопасной серверной функцией."}</p></section><section className="dashboard-panel"><h2>{kk?"Шақырылған мұғалімдер":"Приглашённые учителя"}</h2>{teachers.length?teachers.map(t=><article className="application-item" key={t.id}><div className="application-info"><h3>{t.email}</h3><p>{t.subject}</p></div><span className="status-pill">{t.status||"pending"}</span></article>):<div className="empty-state">{kk?"Шақырулар жоқ.":"Приглашений пока нет."}</div>}</section></div>}
+    {tab==="students"&&<section className="dashboard-panel"><div className="dashboard-panel-head"><div><h2>{kk?"Оқушы қосу":"Добавить ученика"}</h2><p>{kk?"Оқушыны мектеп тізіміне енгізіңіз.":"Добавьте ученика в школьный список."}</p></div></div><form className="admin-form" onSubmit={addStudent}><label>{kk?"Оқушының аты-жөні":"ФИО ученика"}<input required value={studentForm.fullName} onChange={e=>setStudentForm({...studentForm,fullName:e.target.value})}/></label><label>{kk?"Сынып":"Класс"}<select value={studentForm.grade} onChange={e=>setStudentForm({...studentForm,grade:e.target.value})}>{Array.from({length:11},(_,i)=>String(i+1)).map(v=><option key={v}>{v}</option>)}</select></label><label>{kk?"Сынып әрпі":"Обозначение класса"}<input required placeholder="5 «А»" value={studentForm.className} onChange={e=>setStudentForm({...studentForm,className:e.target.value})}/></label><button className="btn btn-primary">{kk?"Оқушыны қосу":"Добавить ученика"}</button></form><div className="application-list" style={{marginTop:22}}>{students.length?students.map(s=><article className="application-item" key={s.id}><div className="application-info"><h3>{s.fullName}</h3><p>{s.grade} {kk?"сынып":"класс"} · {s.className}</p></div><span className="status-pill">{s.status||"pending_account"}</span></article>):<div className="empty-state">{kk?"Оқушылар тізімі бос.":"Список учеников пуст."}</div>}</div></section>}
+  </div></div>;
+}
+
+export default function App(){const [lang,setLang]=useState<Lang>("kk");return <Routes><Route path="/login" element={<Login lang={lang}/>}/><Route path="/dashboard" element={<Dashboard lang={lang}/>}/><Route path="/school" element={<SchoolAdmin lang={lang}/>}/><Route path="*" element={<Landing lang={lang} setLang={setLang}/>}/></Routes>}
