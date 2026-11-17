@@ -20,7 +20,7 @@ service cloud.firestore {
 
     match /schools/{schoolId} {
       allow read: if isPlatformAdmin() || sameSchool(schoolId);
-      allow create: if false; // School creation/approval must be performed by a trusted server.
+      allow create: if isPlatformAdmin(); // Only Super Admin can create an approved school record.
       allow update, delete: if isPlatformAdmin();
     }
 
