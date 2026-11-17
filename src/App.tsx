@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, Route, Routes, useNavigate } from "react-router-dom";
-import { signInWithEmailAndPassword } from "firebase/auth";
-import { addDoc, collection, serverTimestamp } from "firebase/firestore";
+import { onAuthStateChanged, signInWithEmailAndPassword, signOut, type User } from "firebase/auth";
+import { addDoc, collection, doc, getDoc, getDocs, serverTimestamp, setDoc, updateDoc } from "firebase/firestore";
 import { ArrowRight, Award, BookOpen, Building2, CheckCircle2, ChevronDown, Globe2, GraduationCap, LockKeyhole, Menu, ShieldCheck, Sparkles, Trophy, Users, X } from "lucide-react";
 import { auth, db, firebaseConfigured } from "./firebase";
 
@@ -43,4 +43,62 @@ function Landing({lang,setLang}:{lang:Lang;setLang:(v:Lang)=>void}) {
   </main><footer id="contact"><a className="brand" href="#"><span className="brand-mark"><Trophy size={20}/></span><span>OLYMPUS<small>SCHOOL OLYMPIAD PLATFORM</small></span></a><p>{t.footer}</p><span>© 2026 OLYMPUS</span></footer></div>
 }
 function Login({lang}:{lang:Lang}){const t=copy[lang];const [email,setEmail]=useState("");const [password,setPassword]=useState("");const [error,setError]=useState("");const [busy,setBusy]=useState(false);const navigate=useNavigate();async function submit(e:React.FormEvent){e.preventDefault();setError("");if(!auth){setError(t.noConfig);return;}setBusy(true);try{await signInWithEmailAndPassword(auth,email,password);navigate("/dashboard");}catch{setError(t.loginError);}finally{setBusy(false);}}return <div className="auth-page"><Link className="brand" to="/"><span className="brand-mark"><Trophy/></span><span>OLYMPUS<small>SCHOOL OLYMPIAD PLATFORM</small></span></Link><form className="auth-card" onSubmit={submit}><div className="feature-icon"><LockKeyhole/></div><h1>{t.loginTitle}</h1><p>{lang==="kk"?"Мектеп аккаунтыңыз арқылы кіріңіз":"Войдите с помощью аккаунта вашей школы"}</p><label>{t.email}<input type="email" required value={email} onChange={e=>setEmail(e.target.value)}/></label><label>{t.password}<input type="password" required value={password} onChange={e=>setPassword(e.target.value)}/></label>{error&&<p className="form-error">{error}</p>}<button className="btn btn-primary submit-btn" disabled={busy}>{busy?"…":t.enter}<ArrowRight size={17}/></button><Link className="back-link" to="/">← {lang==="kk"?"Басты бетке":"На главную"}</Link></form></div>}
-export default function App(){const [lang,setLang]=useState<Lang>("kk");return <Routes><Route path="/login" element={<Login lang={lang}/>}/><Route path="*" element={<Landing lang={lang} setLang={setLang}/>}/></Routes>}
+
+type SchoolApplication = { id: string; school?: string; email?: string; city?: string; contact?: string; status?: string };
+function Dashboard({lang}:{lang:Lang}) {
+  const [user,setUser]=useState<User|null>(null);
+  const [role,setRole]=useState("");
+  const [apps,setApps]=useState<SchoolApplication[]>([]);
+  const [loading,setLoading]=useState(true);
+  const [message,setMessage]=useState("");
+  const [busyId,setBusyId]=useState("");
+  const kk=lang==="kk";
+  useEffect(()=>{
+    if(!auth||!db){setLoading(false);return;}
+    const unsub=onAuthStateChanged(auth,async current=>{
+      setUser(current);
+      if(!current){setRole("");setApps([]);setLoading(false);return;}
+      try{
+        const profile=await getDoc(doc(db,"users",current.uid));
+        const currentRole=profile.exists()?String(profile.data().role||""):"";
+        setRole(currentRole);
+        if(currentRole==="super_admin"){
+          const snap=await getDocs(collection(db,"schoolApplications"));
+          setApps(snap.docs.map(d=>({id:d.id,...d.data()} as SchoolApplication)).sort((a,b)=>String(a.status||"").localeCompare(String(b.status||""))));
+        }
+      }catch{setMessage(kk?"Деректерді жүктеу мүмкін болмады. Firestore ережелерін тексеріңіз.":"Не удалось загрузить данные. Проверьте правила Firestore.");}
+      finally{setLoading(false);}
+    });
+    return ()=>unsub();
+  },[kk]);
+  async function approve(a:SchoolApplication){
+    if(!db)return;
+    setBusyId(a.id);setMessage("");
+    try{
+      const schoolRef=doc(collection(db,"schools"));
+      await setDoc(schoolRef,{name:a.school||"",email:a.email||"",city:a.city||"",contact:a.contact||"",status:"active",createdAt:serverTimestamp(),approvedAt:serverTimestamp()});
+      await updateDoc(doc(db,"schoolApplications",a.id),{status:"approved",schoolId:schoolRef.id,reviewedAt:serverTimestamp()});
+      setApps(old=>old.map(x=>x.id===a.id?{...x,status:"approved"}:x));
+      setMessage(kk?"Мектеп өтінімі мақұлданды. Мектеп құрылды.":"Заявка одобрена. Школа создана.");
+    }catch{setMessage(kk?"Мақұлдау орындалмады. Firestore ережелерін тексеріңіз.":"Не удалось одобрить заявку. Проверьте правила Firestore.");}
+    finally{setBusyId("");}
+  }
+  async function reject(a:SchoolApplication){
+    if(!db)return;setBusyId(a.id);setMessage("");
+    try{await updateDoc(doc(db,"schoolApplications",a.id),{status:"rejected",reviewedAt:serverTimestamp()});setApps(old=>old.map(x=>x.id===a.id?{...x,status:"rejected"}:x));}
+    catch{setMessage(kk?"Өтінімді өзгерту мүмкін болмады.":"Не удалось обновить заявку.");}
+    finally{setBusyId("");}
+  }
+  if(loading)return <div className="auth-page"><div className="auth-card">OLYMPUS · {kk?"Жүктелуде…":"Загрузка…"}</div></div>;
+  if(!user)return <div className="auth-page"><div className="auth-card"><h1>{kk?"Жүйеге кіріңіз":"Войдите в систему"}</h1><Link className="btn btn-primary" to="/login">{kk?"Кіру":"Войти"}</Link></div></div>;
+  if(role!=="super_admin")return <div className="auth-page"><div className="auth-card"><h1>{kk?"Қолжетімділік шектеулі":"Нет доступа"}</h1><p>{kk?"Бұл аккаунтқа Super Admin рөлі берілмеген.":"У этой учётной записи нет роли Super Admin."}</p><button className="btn btn-ghost" onClick={()=>signOut(auth!)}>{kk?"Шығу":"Выйти"}</button></div></div>;
+  const pending=apps.filter(a=>(a.status||"pending")==="pending");
+  return <div className="auth-page"><div className="dashboard-shell">
+    <header className="dashboard-head"><Link className="brand" to="/"><span className="brand-mark"><Trophy/></span><span>OLYMPUS<small>SUPER ADMIN</small></span></Link><button className="btn btn-ghost" onClick={()=>auth&&signOut(auth)}>{kk?"Жүйеден шығу":"Выйти"}</button></header>
+    <div className="dashboard-title"><div><span className="section-kicker">OLYMPUS · CONTROL CENTER</span><h1>{kk?"Басқару панелі":"Панель управления"}</h1><p>{user.email}</p></div><div className="dashboard-stat"><strong>{apps.length}</strong><span>{kk?"Барлық өтінім":"Всего заявок"}</span></div><div className="dashboard-stat"><strong>{pending.length}</strong><span>{kk?"Күтудегі өтінім":"Ожидают решения"}</span></div></div>
+    {message&&<p className="dashboard-message">{message}</p>}
+    <section className="dashboard-panel"><div className="dashboard-panel-head"><div><h2>{kk?"Мектеп өтінімдері":"Заявки школ"}</h2><p>{kk?"Жаңа мектептерді қарап, мақұлдаңыз немесе қабылдамаңыз.":"Проверяйте заявки новых школ, одобряйте или отклоняйте их."}</p></div></div>
+    {apps.length===0?<div className="empty-state">{kk?"Әзірге өтінімдер жоқ.":"Пока заявок нет."}</div>:<div className="application-list">{apps.map(a=><article className="application-item" key={a.id}><div className="application-info"><span className={"status-pill "+(a.status||"pending")}>{a.status==="approved"?(kk?"Мақұлданды":"Одобрена"):a.status==="rejected"?(kk?"Қабылданбады":"Отклонена"):(kk?"Күтуде":"На рассмотрении")}</span><h3>{a.school||"—"}</h3><p>{a.city||"—"} · {a.contact||"—"}</p><a href={"mailto:"+a.email}>{a.email}</a></div>{(a.status||"pending")==="pending"&&<div className="application-actions"><button className="btn btn-primary" disabled={!!busyId} onClick={()=>approve(a)}>{busyId===a.id?(kk?"…":"…"):(kk?"Мақұлдау":"Одобрить")}</button><button className="btn btn-ghost" disabled={!!busyId} onClick={()=>reject(a)}>{kk?"Қабылдамау":"Отклонить"}</button></div>}</article>)}</div>}</section>
+  </div></div>;
+}
+\nexport default function App(){const [lang,setLang]=useState<Lang>("kk");return <Routes><Route path="/login" element={<Login lang={lang}/>}/><Route path="/dashboard" element={<Dashboard lang={lang}/>}/><Route path="*" element={<Landing lang={lang} setLang={setLang}/>}/></Routes>}
