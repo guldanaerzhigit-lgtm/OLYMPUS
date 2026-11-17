@@ -35,7 +35,7 @@ export default function AdminOlympiadQuestions({ lang }: { lang: "kk" | "ru" }) 
     } catch (e) { setMessage(String((e as Error).message || e)); }
     finally { setBusy(false); }
   }
-  return <section className="dashboard-panel admin-stack"><div className="dashboard-panel-head"><div><h2>{kk ? "Олимпиадаға сұрақ қосу" : "Добавить вопросы к олимпиаде"}</h2><p>{kk ? "Жарияланбаған жобаға сұрақтар қосыңыз. Жарияланған соң дұрыс жауаптар өзгертілмейді." : "Добавьте вопросы в черновик. После публикации ответы защищены от изменений."}</p></div></div>
+  return <section className="dashboard-panel admin-stack"><div className="dashboard-panel-head"><div><h2>{kk ? "Олимпиадаға сұрақ қосу" : "Добавить вопросы к олимпиаде"}</h2><p>{kk ? "Жарияланбаған жобаға сұрақтар қосыңыз. Жарияланған соң дұрыс жауаптар өзгертілмейді." : "Добавьте вопросы в черновик. После публикации ответы защищены от изменений."}</p></div><button type="button" className="btn btn-ghost" onClick={() => void reload()}>{kk ? "Тізімді жаңарту" : "Обновить список"}</button></div>
     <div className="application-list">{items.map(item => <article className="application-item" key={item.id}><div className="application-info"><h3>{item.title}</h3><p>{item.questionCount || 0} {kk ? "сұрақ" : "вопросов"}</p></div></article>)}</div>
     <form className="admin-form" onSubmit={submit}>
       <label>{kk ? "Олимпиада жобасы" : "Черновик олимпиады"}<select required value={selected} onChange={e => setSelected(e.target.value)}><option value="">{kk ? "Таңдаңыз" : "Выберите"}</option>{items.map(item => <option key={item.id} value={item.id}>{item.title}</option>)}</select></label>
