@@ -1,0 +1,3 @@
+OLYMPUS deployment check
+Commit marker: 2026-11-17
+Purpose: verify that Cloudflare Pages deploys the latest commit from main.
