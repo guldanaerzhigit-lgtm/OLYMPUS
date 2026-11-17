@@ -4,7 +4,8 @@ service cloud.firestore {
     function signedIn() { return request.auth != null; }
     function userDoc() { return get(/databases/$(database)/documents/users/$(request.auth.uid)).data; }
     function isPlatformAdmin() { return signedIn() && userDoc().role == 'super_admin'; }
-    function sameSchool(schoolId) { return signedIn() && userDoc().schoolId == schoolId; }
+    function schoolIsActive(schoolId) { return get(/databases/$(database)/documents/schools/$(schoolId)).data.status == 'active'; }
+    function sameSchool(schoolId) { return signedIn() && userDoc().schoolId == schoolId && schoolIsActive(schoolId); }
     function schoolAdmin(schoolId) { return sameSchool(schoolId) && userDoc().role == 'school_admin'; }
 
     match /users/{uid} {
