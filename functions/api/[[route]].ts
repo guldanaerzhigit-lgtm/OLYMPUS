@@ -107,7 +107,8 @@ export async function onRequestPost({ request, env }: Ctx) {
       const invite = { email, role, schoolId, tokenHash: await sha(rawToken), status: "pending", createdBy: callerAuth.localId, createdAt: new Date().toISOString(), expiresAt, language, displayName: String(body.displayName || ""), grade: String(body.grade || ""), className: String(body.className || ""), subject: String(body.subject || "") };
       await firestore(token, "invitations?documentId=" + id, { method: "POST", body: JSON.stringify({ fields: fields(invite) }) });
       const inviteUrl = env.APP_BASE_URL.replace(/\/$/, "") + "/register-invite?token=" + rawToken;
-      const emailSent = await sendInvite(env, email, role, inviteUrl, language);
+      let emailSent = false;
+      try { emailSent = await sendInvite(env, email, role, inviteUrl, language); } catch { emailSent = false; }
       return json({ invitationId: id, inviteUrl, emailSent, expiresInHours: 72 });
     }
     if (new URL(request.url).pathname === "/api/register-invite") {
