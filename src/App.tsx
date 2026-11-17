@@ -3,7 +3,9 @@ import { Link, Navigate, Route, Routes, useNavigate } from "react-router-dom";
 import { onAuthStateChanged, signInWithEmailAndPassword, signOut, type User } from "firebase/auth";
 import { addDoc, collection, doc, getDoc, getDocs, serverTimestamp, setDoc, updateDoc, writeBatch } from "firebase/firestore";
 import { ArrowRight, Award, BookOpen, Building2, CheckCircle2, ChevronDown, Globe2, GraduationCap, LockKeyhole, Menu, ShieldCheck, Sparkles, Trophy, Users, X } from "lucide-react";
-import { auth, db, firebaseConfigured } from "./firebase";
+import { auth, db, firebaseConfigured, functions } from "./firebase";
+import { httpsCallable } from "firebase/functions";
+import InviteRegistration from "./InviteRegistration";
 import * as XLSX from "xlsx";
 
 type Lang = "kk" | "ru";
@@ -124,12 +126,14 @@ function Dashboard({lang}:{lang:Lang}) {
     finally{setBusyId("");}
   }
   async function createInvite(e:React.FormEvent){
-    e.preventDefault();if(!db)return;setMessage("");
+    e.preventDefault();if(!functions)return;setMessage("");
     try{
-      await addDoc(collection(db,"invitations"),{email:inviteForm.email.trim().toLowerCase(),schoolId:inviteForm.schoolId,role:inviteForm.role,status:"pending",createdAt:serverTimestamp(),createdBy:user?.uid||""});
+      const invite=httpsCallable(functions,"createRoleInvitation");
+      const result=await invite({email:inviteForm.email.trim(),schoolId:inviteForm.schoolId,role:"school_admin",language:lang});
+      const data=result.data as {inviteUrl:string;emailSent:boolean};
       setInviteForm({email:"",schoolId:"",role:"school_admin"});await reloadData();
-      setMessage(kk?"Шақыру жазбасы жасалды. Нақты аккаунт ашу үшін серверлік шақыру қызметін қосу қажет.":"Запись приглашения создана. Для создания аккаунта и отправки письма нужен серверный сервис приглашений.");
-    }catch{setMessage(kk?"Шақыруды сақтау мүмкін болмады.":"Не удалось сохранить приглашение.");}
+      setMessage((kk?"Шақыру дайын. ":"Приглашение создано. ")+(data.emailSent?(kk?"Email жіберілді. ":"Письмо отправлено. "):(kk?"Email қызметі қосылмаған, сілтемені қолмен жіберіңіз: ":"Email-сервис не подключён, отправьте ссылку вручную: "))+data.inviteUrl);
+    }catch(err){setMessage((kk?"Шақыру жіберілмеді: ":"Не удалось создать приглашение: ")+String((err as Error).message||""));}
   }
   if(loading)return <div className="auth-page"><div className="auth-card">OLYMPUS · {kk?"Жүктелуде…":"Загрузка…"}</div></div>;
   if(!user)return <div className="auth-page"><div className="auth-card"><h1>{kk?"Жүйеге кіріңіз":"Войдите в систему"}</h1><Link className="btn btn-primary" to="/login">{kk?"Кіру":"Войти"}</Link></div></div>;
@@ -184,7 +188,7 @@ function SchoolAdmin({lang}:{lang:Lang}) {
   const [message,setMessage]=useState("");
   const [className,setClassName]=useState("");
   const [grade,setGrade]=useState("5");
-  const [studentForm,setStudentForm]=useState({fullName:"",grade:"5",className:""});
+  const [studentForm,setStudentForm]=useState({fullName:"",grade:"5",className:"",email:""});
   const [teacherForm,setTeacherForm]=useState({email:"",subject:""});
   const kk=lang==="kk";
   const labels=kk?{overview:"Шолу",classes:"Сыныптар",teachers:"Мұғалімдер",students:"Оқушылар"}:{overview:"Обзор",classes:"Классы",teachers:"Учителя",students:"Ученики"};
@@ -223,13 +227,30 @@ function SchoolAdmin({lang}:{lang:Lang}) {
   }
   async function addStudent(e:React.FormEvent){
     e.preventDefault();if(!db||!schoolId)return;
-    try{await addDoc(collection(db,"schools",schoolId,"students"),{...studentForm,grade:Number(studentForm.grade),status:"pending_account",createdAt:serverTimestamp(),createdBy:user?.uid||""});setStudentForm({fullName:"",grade:"5",className:""});await reload(schoolId);setMessage(kk?"Оқушы тізімге қосылды. Аккаунтын кейін шақыру арқылы ашуға болады.":"Ученик добавлен в список. Аккаунт можно будет создать через приглашение.");}
-    catch{setMessage(kk?"Оқушыны қосу мүмкін болмады.":"Не удалось добавить ученика.");}
+    try{
+      if(studentForm.email.trim()){
+        const invite=httpsCallable(functions,"createRoleInvitation");
+        const result=await invite({email:studentForm.email.trim(),schoolId,role:"student",displayName:studentForm.fullName,grade:studentForm.grade,className:studentForm.className,language:lang});
+        const data=result.data as {inviteUrl:string;emailSent:boolean};
+        await addDoc(collection(db,"schools",schoolId,"students"),{...studentForm,grade:Number(studentForm.grade),status:"invited",invitationId:(result.data as {invitationId:string}).invitationId,createdAt:serverTimestamp(),createdBy:user?.uid||""});
+        setMessage((kk?"Оқушыға шақыру дайын. ":"Приглашение ученику создано. ")+(data.emailSent?(kk?"Email жіберілді. ":"Письмо отправлено. "):(kk?"Сілтемені қолмен жіберіңіз: ":"Отправьте ссылку вручную: "))+data.inviteUrl);
+      }else{
+        await addDoc(collection(db,"schools",schoolId,"students"),{...studentForm,grade:Number(studentForm.grade),status:"pending_account",createdAt:serverTimestamp(),createdBy:user?.uid||""});
+        setMessage(kk?"Оқушы тізімге қосылды. Email енгізсеңіз, оған шақыру жіберіледі.":"Ученик добавлен. Укажите email, чтобы отправить приглашение.");
+      }
+      setStudentForm({fullName:"",grade:"5",className:"",email:""});await reload(schoolId);
+    }catch(err){setMessage((kk?"Оқушыны қосу мүмкін болмады: ":"Не удалось добавить ученика: ")+String((err as Error).message||""));}
   }
   async function inviteTeacher(e:React.FormEvent){
-    e.preventDefault();if(!db||!schoolId)return;
-    try{await addDoc(collection(db,"schools",schoolId,"teacherInvites"),{email:teacherForm.email.trim().toLowerCase(),subject:teacherForm.subject,status:"pending",createdAt:serverTimestamp(),createdBy:user?.uid||""});setTeacherForm({email:"",subject:""});await reload(schoolId);setMessage(kk?"Мұғалімге шақыру жазбасы жасалды. Аккаунт ашу үшін серверлік шақыру қажет.":"Запись приглашения создана. Для создания аккаунта требуется серверное приглашение.");}
-    catch{setMessage(kk?"Шақыруды сақтау мүмкін болмады.":"Не удалось сохранить приглашение.");}
+    e.preventDefault();if(!db||!schoolId||!functions)return;
+    try{
+      const invite=httpsCallable(functions,"createRoleInvitation");
+      const result=await invite({email:teacherForm.email.trim(),schoolId,role:"teacher",subject:teacherForm.subject,language:lang});
+      const data=result.data as {inviteUrl:string;emailSent:boolean;invitationId:string};
+      await addDoc(collection(db,"schools",schoolId,"teacherInvites"),{email:teacherForm.email.trim().toLowerCase(),subject:teacherForm.subject,status:"pending",invitationId:data.invitationId,createdAt:serverTimestamp(),createdBy:user?.uid||""});
+      setTeacherForm({email:"",subject:""});await reload(schoolId);
+      setMessage((kk?"Мұғалімге шақыру дайын. ":"Приглашение учителю создано. ")+(data.emailSent?(kk?"Email жіберілді. ":"Письмо отправлено. "):(kk?"Email қызметі қосылмаған, сілтемені қолмен жіберіңіз: ":"Email-сервис не подключён, отправьте ссылку вручную: "))+data.inviteUrl);
+    }catch(err){setMessage((kk?"Шақыру жіберілмеді: ":"Не удалось создать приглашение: ")+String((err as Error).message||""));}
   }
   if(loading)return <div className="auth-page"><div className="auth-card">{kk?"Жүктелуде…":"Загрузка…"}</div></div>;
   if(!user)return <div className="auth-page"><div className="auth-card"><h1>{kk?"Жүйеге кіріңіз":"Войдите в систему"}</h1><Link className="btn btn-primary" to="/login">{kk?"Кіру":"Войти"}</Link></div></div>;
@@ -242,7 +263,7 @@ function SchoolAdmin({lang}:{lang:Lang}) {
     {tab==="overview"&&<section className="admin-grid"><article className="admin-module"><span className="section-kicker">01 · CLASSES</span><h2>{labels.classes}</h2><strong>{classes.length}</strong><p>{kk?"Мектеп сыныптары":"Учебные классы школы"}</p><button className="btn btn-primary" onClick={()=>setTab("classes")}>{kk?"Ашу":"Открыть"} <ArrowRight size={15}/></button></article><article className="admin-module"><span className="section-kicker">02 · TEACHERS</span><h2>{labels.teachers}</h2><strong>{teachers.length}</strong><p>{kk?"Мұғалім шақырулары":"Приглашения учителей"}</p><button className="btn btn-primary" onClick={()=>setTab("teachers")}>{kk?"Ашу":"Открыть"} <ArrowRight size={15}/></button></article><article className="admin-module"><span className="section-kicker">03 · STUDENTS</span><h2>{labels.students}</h2><strong>{students.length}</strong><p>{kk?"Оқушылар тізімі":"Список учеников"}</p><button className="btn btn-primary" onClick={()=>setTab("students")}>{kk?"Ашу":"Открыть"} <ArrowRight size={15}/></button></article></section>}
     {tab==="classes"&&<section className="dashboard-panel"><div className="dashboard-panel-head"><div><h2>{kk?"Сыныптар":"Классы"}</h2><p>{kk?"Мектептің оқу сыныптарын құрыңыз.":"Создавайте учебные классы школы."}</p></div></div><form className="admin-form" onSubmit={addClass}><label>{kk?"Сынып атауы":"Название класса"}<input required placeholder="5 «А»" value={className} onChange={e=>setClassName(e.target.value)}/></label><label>{kk?"Сынып деңгейі":"Параллель"}<select value={grade} onChange={e=>setGrade(e.target.value)}>{Array.from({length:11},(_,i)=>String(i+1)).map(v=><option key={v}>{v}</option>)}</select></label><button className="btn btn-primary">{kk?"Сынып қосу":"Добавить класс"}</button></form><div className="application-list" style={{marginTop:22}}>{classes.length?classes.map(c=><article className="application-item" key={c.id}><div className="application-info"><h3>{c.name}</h3><p>{c.grade} {kk?"сынып":"класс"} · {c.academicYear}</p></div><span className="status-pill approved">{c.studentCount||0} {kk?"оқушы":"учеников"}</span></article>):<div className="empty-state">{kk?"Сыныптар әлі қосылмаған.":"Классы пока не добавлены."}</div>}</div></section>}
     {tab==="teachers"&&<div className="admin-stack"><section className="dashboard-panel"><div className="dashboard-panel-head"><div><h2>{kk?"Мұғалімді шақыру":"Пригласить учителя"}</h2><p>{kk?"Мұғалімнің email мекенжайын және пәнін енгізіңіз.":"Укажите email учителя и предмет."}</p></div></div><form className="admin-form" onSubmit={inviteTeacher}><label>Email<input required type="email" value={teacherForm.email} onChange={e=>setTeacherForm({...teacherForm,email:e.target.value})}/></label><label>{kk?"Пәні":"Предмет"}<input required value={teacherForm.subject} onChange={e=>setTeacherForm({...teacherForm,subject:e.target.value})}/></label><button className="btn btn-primary">{kk?"Шақыру жазбасын жасау":"Создать приглашение"}</button></form><p className="admin-notice">{kk?"Бұл әзірге шақыру жазбасы. Firebase Auth аккаунтын ашу және email жіберу қауіпсіз серверлік функцияда іске асырылады.":"Пока это запись приглашения. Создание Firebase Auth аккаунта и отправка email выполняются безопасной серверной функцией."}</p></section><section className="dashboard-panel"><h2>{kk?"Шақырылған мұғалімдер":"Приглашённые учителя"}</h2>{teachers.length?teachers.map(t=><article className="application-item" key={t.id}><div className="application-info"><h3>{t.email}</h3><p>{t.subject}</p></div><span className="status-pill">{t.status||"pending"}</span></article>):<div className="empty-state">{kk?"Шақырулар жоқ.":"Приглашений пока нет."}</div>}</section></div>}
-    {tab==="students"&&<section className="dashboard-panel"><div className="dashboard-panel-head"><div><h2>{kk?"Оқушы қосу":"Добавить ученика"}</h2><p>{kk?"Оқушыны мектеп тізіміне енгізіңіз.":"Добавьте ученика в школьный список."}</p></div></div><form className="admin-form" onSubmit={addStudent}><label>{kk?"Оқушының аты-жөні":"ФИО ученика"}<input required value={studentForm.fullName} onChange={e=>setStudentForm({...studentForm,fullName:e.target.value})}/></label><label>{kk?"Сынып":"Класс"}<select value={studentForm.grade} onChange={e=>setStudentForm({...studentForm,grade:e.target.value})}>{Array.from({length:11},(_,i)=>String(i+1)).map(v=><option key={v}>{v}</option>)}</select></label><label>{kk?"Сынып әрпі":"Обозначение класса"}<input required placeholder="5 «А»" value={studentForm.className} onChange={e=>setStudentForm({...studentForm,className:e.target.value})}/></label><button className="btn btn-primary">{kk?"Оқушыны қосу":"Добавить ученика"}</button></form><div className="application-list" style={{marginTop:22}}>{students.length?students.map(s=><article className="application-item" key={s.id}><div className="application-info"><h3>{s.fullName}</h3><p>{s.grade} {kk?"сынып":"класс"} · {s.className}</p></div><span className="status-pill">{s.status||"pending_account"}</span></article>):<div className="empty-state">{kk?"Оқушылар тізімі бос.":"Список учеников пуст."}</div>}</div></section>}
+    {tab==="students"&&<section className="dashboard-panel"><div className="dashboard-panel-head"><div><h2>{kk?"Оқушы қосу":"Добавить ученика"}</h2><p>{kk?"Оқушыны мектеп тізіміне енгізіңіз.":"Добавьте ученика в школьный список."}</p></div></div><form className="admin-form" onSubmit={addStudent}><label>{kk?"Оқушының аты-жөні":"ФИО ученика"}<input required value={studentForm.fullName} onChange={e=>setStudentForm({...studentForm,fullName:e.target.value})}/></label><label>{kk?"Сынып":"Класс"}<select value={studentForm.grade} onChange={e=>setStudentForm({...studentForm,grade:e.target.value})}>{Array.from({length:11},(_,i)=>String(i+1)).map(v=><option key={v}>{v}</option>)}</select></label><label>{kk?"Сынып әрпі":"Обозначение класса"}<input required placeholder="5 «А»" value={studentForm.className} onChange={e=>setStudentForm({...studentForm,className:e.target.value})}/></label><label>Email ({kk?"міндетті емес":"необязательно"})<input type="email" value={studentForm.email} onChange={e=>setStudentForm({...studentForm,email:e.target.value})}/></label><button className="btn btn-primary">{kk?"Оқушыны қосу / шақыру":"Добавить / пригласить ученика"}</button></form><div className="application-list" style={{marginTop:22}}>{students.length?students.map(s=><article className="application-item" key={s.id}><div className="application-info"><h3>{s.fullName}</h3><p>{s.grade} {kk?"сынып":"класс"} · {s.className}</p></div><span className="status-pill">{s.status||"pending_account"}</span></article>):<div className="empty-state">{kk?"Оқушылар тізімі бос.":"Список учеников пуст."}</div>}</div></section>}
   </div></div>;
 }
 
@@ -278,4 +299,4 @@ function TeacherDashboard({lang}:{lang:Lang}) {
  </div></div>;
 }
 
-export default function App(){const [lang,setLang]=useState<Lang>("kk");return <Routes><Route path="/login" element={<Login lang={lang}/>}/><Route path="/dashboard" element={<Dashboard lang={lang}/>}/><Route path="/school" element={<SchoolAdmin lang={lang}/>}/><Route path="/teacher" element={<TeacherDashboard lang={lang}/>}/><Route path="*" element={<Landing lang={lang} setLang={setLang}/>}/></Routes>}
+export default function App(){const [lang,setLang]=useState<Lang>("kk");return <Routes><Route path="/login" element={<Login lang={lang}/>}/><Route path="/register-invite" element={<InviteRegistration lang={lang}/>}/><Route path="/dashboard" element={<Dashboard lang={lang}/>}/><Route path="/school" element={<SchoolAdmin lang={lang}/>}/><Route path="/teacher" element={<TeacherDashboard lang={lang}/>}/><Route path="*" element={<Landing lang={lang} setLang={setLang}/>}/></Routes>}
