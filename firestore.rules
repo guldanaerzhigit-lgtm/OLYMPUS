@@ -18,7 +18,7 @@ service cloud.firestore {
     }
 
     match /schools/{schoolId} {
-      allow read: if isPlatformAdmin() || sameSchool(schoolId);
+      allow read: if isPlatformAdmin() || schoolAdmin(schoolId) || (sameSchool(schoolId) && userDoc().role == 'teacher');
       allow create: if isPlatformAdmin(); // Only Super Admin can create an approved school record.
       allow update, delete: if isPlatformAdmin();
     }
@@ -33,25 +33,40 @@ service cloud.firestore {
     }
 
     match /schools/{schoolId}/tasks/{taskId} {
-      allow read: if isPlatformAdmin() || sameSchool(schoolId);
+      allow read: if isPlatformAdmin() || schoolAdmin(schoolId) || (sameSchool(schoolId) && userDoc().role == 'teacher');
       allow create: if isPlatformAdmin() || schoolAdmin(schoolId) || (sameSchool(schoolId) && userDoc().role == 'teacher' && request.resource.data.createdBy == request.auth.uid);
       allow update, delete: if isPlatformAdmin() || schoolAdmin(schoolId) || (sameSchool(schoolId) && userDoc().role == 'teacher' && resource.data.createdBy == request.auth.uid);
     }
 
     match /schools/{schoolId}/students/{studentId} {
-      allow read: if isPlatformAdmin() || sameSchool(schoolId);
+      allow read: if isPlatformAdmin() || schoolAdmin(schoolId) || (sameSchool(schoolId) && userDoc().role == 'teacher');
       allow create: if isPlatformAdmin() || schoolAdmin(schoolId) || (sameSchool(schoolId) && userDoc().role == 'teacher' && request.resource.data.createdBy == request.auth.uid);
       allow update, delete: if isPlatformAdmin() || schoolAdmin(schoolId);
     }
 
     match /schools/{schoolId}/{document=**} {
-      allow read: if isPlatformAdmin() || sameSchool(schoolId);
+      allow read: if isPlatformAdmin() || schoolAdmin(schoolId) || (sameSchool(schoolId) && userDoc().role == 'teacher');
       allow write: if isPlatformAdmin() || schoolAdmin(schoolId);
     }
 
     match /olympiads/{olympiadId} {
       allow read: if signedIn();
       allow create, update, delete: if isPlatformAdmin();
+    }
+
+    // Private olympiad data is accessed only through authenticated Pages Functions.
+    // Correct answers must never be readable from the student client.
+    match /olympiads/{olympiadId}/questions/{questionId} {
+      allow read, write: if false;
+    }
+    match /olympiads/{olympiadId}/attempts/{uid} {
+      allow read, write: if false;
+    }
+    match /olympiads/{olympiadId}/results/{uid} {
+      allow read, write: if false;
+    }
+    match /certificates/{certificateId} {
+      allow read, write: if false;
     }
 
     match /{document=**} { allow read, write: if false; }
