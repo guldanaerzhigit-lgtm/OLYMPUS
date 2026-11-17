@@ -33,6 +33,18 @@ service cloud.firestore {
       allow read, write: if isPlatformAdmin();
     }
 
+    match /schools/{schoolId}/tasks/{taskId} {
+      allow read: if isPlatformAdmin() || sameSchool(schoolId);
+      allow create: if isPlatformAdmin() || schoolAdmin(schoolId) || (sameSchool(schoolId) && userDoc().role == 'teacher' && request.resource.data.createdBy == request.auth.uid);
+      allow update, delete: if isPlatformAdmin() || schoolAdmin(schoolId) || (sameSchool(schoolId) && userDoc().role == 'teacher' && resource.data.createdBy == request.auth.uid);
+    }
+
+    match /schools/{schoolId}/students/{studentId} {
+      allow read: if isPlatformAdmin() || sameSchool(schoolId);
+      allow create: if isPlatformAdmin() || schoolAdmin(schoolId) || (sameSchool(schoolId) && userDoc().role == 'teacher' && request.resource.data.createdBy == request.auth.uid);
+      allow update, delete: if isPlatformAdmin() || schoolAdmin(schoolId);
+    }
+
     match /schools/{schoolId}/{document=**} {
       allow read: if isPlatformAdmin() || sameSchool(schoolId);
       allow write: if isPlatformAdmin() || schoolAdmin(schoolId);
