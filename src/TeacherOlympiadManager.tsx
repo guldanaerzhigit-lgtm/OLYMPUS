@@ -1,7 +1,5 @@
 import { useEffect, useState } from "react";
-import { collection, getDocs } from "firebase/firestore";
 import { apiPost } from "./api";
-import { db } from "./firebase";
 
 type Olympiad = { id: string; title?: string; subject?: string; grade?: number; duration?: number; status?: string; questionCount?: number; schoolId?: string; createdAt?: string };
 type RankRow = { rank: number; studentName: string; score: number; maxScore: number; percentage: number };
@@ -16,10 +14,9 @@ export default function TeacherOlympiadManager({ lang, schoolId }: { lang: "kk" 
   const [question, setQuestion] = useState({ prompt: "", type: "single_choice", options: "A|Бірінші жауап\nB|Екінші жауап\nC|Үшінші жауап\nD|Төртінші жауап", answer: "A", points: "1" });
   const [ranking, setRanking] = useState<RankRow[]>([]);
   async function reload() {
-    if (!db) return;
-    const snap = await getDocs(collection(db, "olympiads"));
-    const rows = snap.docs.map(d => ({ id: d.id, ...d.data() } as Olympiad)).filter(o => o.schoolId === schoolId);
-    setItems(rows.sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || ""))));
+    const data = await apiPost<{ items: Olympiad[] }>("/api/teacher/olympiads", {});
+    const rows = data.items || [];
+    setItems(rows);
     if (!selected && rows.length) setSelected(rows[0].id);
     else if (selected && !rows.some(o => o.id === selected)) setSelected(rows[0]?.id || "");
   }
