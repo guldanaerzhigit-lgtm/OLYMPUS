@@ -9,9 +9,7 @@ service cloud.firestore {
 
     match /users/{uid} {
       allow read: if signedIn() && (request.auth.uid == uid || isPlatformAdmin() || (resource.data.schoolId != null && sameSchool(resource.data.schoolId) && userDoc().role == 'school_admin'));
-      allow create: if signedIn() && request.auth.uid == uid
-        && request.resource.data.role == 'student'
-        && request.resource.data.keys().hasOnly(['displayName','email','role','schoolId','createdAt']);
+      allow create: if false; // Account profiles are created only by trusted Cloud Functions.
       allow update: if isPlatformAdmin() || (signedIn() && request.auth.uid == uid
         && request.resource.data.role == resource.data.role
         && request.resource.data.schoolId == resource.data.schoolId);
