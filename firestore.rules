@@ -1,0 +1,48 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function userDoc() { return get(/databases/$(database)/documents/users/$(request.auth.uid)).data; }
+    function isPlatformAdmin() { return signedIn() && userDoc().role == 'super_admin'; }
+    function sameSchool(schoolId) { return signedIn() && userDoc().schoolId == schoolId; }
+    function schoolAdmin(schoolId) { return sameSchool(schoolId) && userDoc().role == 'school_admin'; }
+
+    match /users/{uid} {
+      allow read: if signedIn() && (request.auth.uid == uid || isPlatformAdmin() || (resource.data.schoolId != null && sameSchool(resource.data.schoolId) && userDoc().role == 'school_admin'));
+      allow create: if signedIn() && request.auth.uid == uid
+        && request.resource.data.role == 'student'
+        && request.resource.data.keys().hasOnly(['displayName','email','role','schoolId','createdAt']);
+      allow update: if isPlatformAdmin() || (signedIn() && request.auth.uid == uid
+        && request.resource.data.role == resource.data.role
+        && request.resource.data.schoolId == resource.data.schoolId);
+      allow delete: if isPlatformAdmin();
+    }
+
+    match /schools/{schoolId} {
+      allow read: if isPlatformAdmin() || sameSchool(schoolId);
+      allow create: if false; // School creation/approval must be performed by a trusted server.
+      allow update, delete: if isPlatformAdmin();
+    }
+
+    match /schoolApplications/{applicationId} {
+      allow create: if true;
+      allow read, update, delete: if isPlatformAdmin();
+    }
+
+    match /invitations/{inviteId} {
+      allow read, write: if isPlatformAdmin();
+    }
+
+    match /schools/{schoolId}/{document=**} {
+      allow read: if isPlatformAdmin() || sameSchool(schoolId);
+      allow write: if isPlatformAdmin() || schoolAdmin(schoolId);
+    }
+
+    match /olympiads/{olympiadId} {
+      allow read: if signedIn();
+      allow create, update, delete: if isPlatformAdmin();
+    }
+
+    match /{document=**} { allow read, write: if false; }
+  }
+}
