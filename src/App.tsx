@@ -6,6 +6,7 @@ import { ArrowRight, Award, BookOpen, Building2, CheckCircle2, ChevronDown, Glob
 import { auth, db, firebaseConfigured, functions } from "./firebase";
 import { httpsCallable } from "firebase/functions";
 import InviteRegistration from "./InviteRegistration";
+import StudentDashboard from "./StudentDashboard";
 import * as XLSX from "xlsx";
 
 type Lang = "kk" | "ru";
@@ -299,4 +300,4 @@ function TeacherDashboard({lang}:{lang:Lang}) {
  </div></div>;
 }
 
-export default function App(){const [lang,setLang]=useState<Lang>("kk");return <Routes><Route path="/login" element={<Login lang={lang}/>}/><Route path="/register-invite" element={<InviteRegistration lang={lang}/>}/><Route path="/dashboard" element={<Dashboard lang={lang}/>}/><Route path="/school" element={<SchoolAdmin lang={lang}/>}/><Route path="/teacher" element={<TeacherDashboard lang={lang}/>}/><Route path="*" element={<Landing lang={lang} setLang={setLang}/>}/></Routes>}
+export default function App(){const [lang,setLang]=useState<Lang>("kk");return <Routes><Route path="/login" element={<Login lang={lang}/>}/><Route path="/register-invite" element={<InviteRegistration lang={lang}/>}/><Route path="/dashboard" element={<Dashboard lang={lang}/>}/><Route path="/school" element={<SchoolAdmin lang={lang}/>}/><Route path="/teacher" element={<TeacherDashboard lang={lang}/>}/><Route path="/student" element={<StudentDashboard lang={lang}/>}/><Route path="*" element={<Landing lang={lang} setLang={setLang}/>}/></Routes>}
