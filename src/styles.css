@@ -58,3 +58,13 @@
 .spreadsheet-import strong{color:#17213d}.spreadsheet-import p{font-size:12px;color:#71809b;line-height:1.7}
 .import-file{position:relative;overflow:hidden;white-space:nowrap}.import-file input{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%}
 @media(max-width:640px){.spreadsheet-import{align-items:stretch;flex-direction:column}.teacher-task-form .teacher-wide{grid-column:auto}}
+
+
+/* Super Admin school management */
+.school-search{width:100%;height:44px;margin:4px 0 18px;padding:0 14px;border:1px solid #e2e6ef;border-radius:10px;background:#fcfcfe;color:#17213d;font:inherit}
+.school-edit-form{padding:18px;margin:0 0 18px;border:1px solid #dfe4f0;border-radius:14px;background:#f8f9ff}
+.school-edit-form h3{grid-column:1/-1;margin:0;color:#17213d}
+.application-actions{align-items:center}
+.application-actions .btn{white-space:nowrap}
+.status-pill.pending{background:#fff5df;color:#a56a0b}
+@media(max-width:760px){.school-edit-form h3{grid-column:auto}.application-actions{flex-wrap:wrap}}
