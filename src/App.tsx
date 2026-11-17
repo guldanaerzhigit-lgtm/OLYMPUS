@@ -66,6 +66,8 @@ function Dashboard({lang}:{lang:Lang}) {
   const [busyId,setBusyId]=useState("");
   const [olympiadForm,setOlympiadForm]=useState({title:"",subject:"Математика",grade:"5",duration:"60",startDate:""});
   const [inviteForm,setInviteForm]=useState({email:"",schoolId:"",role:"school_admin"});
+  const [manualSchoolForm,setManualSchoolForm]=useState({name:"",city:"",email:"",contact:""});
+  const [showManualSchoolForm,setShowManualSchoolForm]=useState(false);
   const kk=lang==="kk";
   const label=(kk?{overview:"Шолу",schools:"Мектептер",applications:"Өтінімдер",olympiads:"Олимпиадалар",invites:"Шақырулар"}:{overview:"Обзор",schools:"Школы",applications:"Заявки",olympiads:"Олимпиады",invites:"Приглашения"});
   async function reloadData(){
@@ -112,6 +114,17 @@ function Dashboard({lang}:{lang:Lang}) {
     catch{setMessage(kk?"Өтінімді өзгерту мүмкін болмады.":"Не удалось обновить заявку.");}
     finally{setBusyId("");}
   }
+  async function createManualSchool(e:React.FormEvent){
+    e.preventDefault();if(!db)return;setMessage("");setBusyId("manual-school");
+    try{
+      const name=manualSchoolForm.name.trim();
+      if(!name)throw new Error(kk?"Мектеп атауын енгізіңіз.":"Введите название школы.");
+      await addDoc(collection(db,"schools"),{name,city:manualSchoolForm.city.trim(),email:manualSchoolForm.email.trim().toLowerCase(),contact:manualSchoolForm.contact.trim(),status:"active",createdAt:serverTimestamp(),approvedAt:serverTimestamp(),createdBy:user?.uid||"",source:"manual"});
+      setManualSchoolForm({name:"",city:"",email:"",contact:""});setShowManualSchoolForm(false);
+      await reloadData();setMessage(kk?"Мектеп сәтті тіркелді. Енді оған мектеп әкімшісін шақыра аласыз.":"Школа успешно зарегистрирована. Теперь можно пригласить её администратора.");
+    }catch(err){setMessage((kk?"Мектепті тіркеу мүмкін болмады: ":"Не удалось зарегистрировать школу: ")+String((err as Error).message||""));}
+    finally{setBusyId("");}
+  }
   async function createOlympiad(e:React.FormEvent){
     e.preventDefault();if(!db)return;setMessage("");
     try{
@@ -156,7 +169,8 @@ function Dashboard({lang}:{lang:Lang}) {
       <article className="admin-module"><span className="section-kicker">02 · APPLICATIONS</span><h2>{kk?"Өтінімдер":"Заявки"}</h2><strong>{pending.length}</strong><p>{kk?"Әкімшінің шешімін күтуде":"Ожидают решения администратора"}</p><button className="btn btn-primary" onClick={()=>setTab("applications")}>{kk?"Қарау":"Проверить"} <ArrowRight size={15}/></button></article>
       <article className="admin-module"><span className="section-kicker">03 · OLYMPIADS</span><h2>{kk?"Олимпиадалар":"Олимпиады"}</h2><strong>{olympiads.length}</strong><p>{kk?"Жасалған олимпиадалар":"Созданные олимпиады"}</p><button className="btn btn-primary" onClick={()=>setTab("olympiads")}>{kk?"Басқару":"Управлять"} <ArrowRight size={15}/></button></article>
     </section>}
-    {tab==="schools"&&<section className="dashboard-panel"><div className="dashboard-panel-head"><div><h2>{kk?"Мектептер тізімі":"Список школ"}</h2><p>{kk?"Мақұлданған мектептердің орталық тізімі.":"Центральный список одобренных школ."}</p></div></div>
+    {tab==="schools"&&<section className="dashboard-panel"><div className="dashboard-panel-head"><div><h2>{kk?"Мектептер тізімі":"Список школ"}</h2><p>{kk?"Мақұлданған мектептердің орталық тізімі.":"Центральный список одобренных школ."}</p></div><button type="button" className="btn btn-primary" onClick={()=>setShowManualSchoolForm(v=>!v)}>{showManualSchoolForm?(kk?"Жабу":"Закрыть"):(kk?"+ Мектепті қолмен қосу":"+ Добавить школу вручную")}</button></div>
+      {showManualSchoolForm&&<form className="admin-form" onSubmit={createManualSchool}><label>{kk?"Мектеп атауы *":"Название школы *"}<input required value={manualSchoolForm.name} onChange={e=>setManualSchoolForm({...manualSchoolForm,name:e.target.value})} placeholder={kk?"Мысалы: №1 мектеп":"Например: Школа №1"}/></label><label>{kk?"Қала / аудан":"Город / район"}<input value={manualSchoolForm.city} onChange={e=>setManualSchoolForm({...manualSchoolForm,city:e.target.value})}/></label><label>{kk?"Мектеп email-ы":"Email школы"}<input type="email" value={manualSchoolForm.email} onChange={e=>setManualSchoolForm({...manualSchoolForm,email:e.target.value})}/></label><label>{kk?"Байланыс тұлғасы":"Контактное лицо"}<input value={manualSchoolForm.contact} onChange={e=>setManualSchoolForm({...manualSchoolForm,contact:e.target.value})}/></label><button className="btn btn-primary" disabled={busyId==="manual-school"}>{busyId==="manual-school"?"…":(kk?"Мектепті тіркеу":"Зарегистрировать школу")} <ArrowRight size={15}/></button></form>}
       {schools.length===0?<div className="empty-state">{kk?"Әзірге мектеп жоқ.":"Пока школ нет."}</div>:<div className="application-list">{schools.map(s=><article className="application-item" key={s.id}><div className="application-info"><span className="status-pill approved">{s.status||"active"}</span><h3>{s.name||"—"}</h3><p>{s.city||"—"} · {s.email||"—"}</p><small>ID: {s.id}</small></div></article>)}</div>}
     </section>}
     {tab==="applications"&&<section className="dashboard-panel"><div className="dashboard-panel-head"><div><h2>{kk?"Мектеп өтінімдері":"Заявки школ"}</h2><p>{kk?"Жаңа мектептерді қарап, мақұлдаңыз немесе қабылдамаңыз.":"Проверяйте заявки новых школ, одобряйте или отклоняйте их."}</p></div></div>
