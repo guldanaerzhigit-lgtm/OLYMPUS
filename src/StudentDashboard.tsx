@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { onAuthStateChanged, signOut, type User } from "firebase/auth";
-import { collection, getDocs } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs } from "firebase/firestore";
+import { Navigate } from "react-router-dom";
 import { Award, Trophy } from "lucide-react";
 import { auth, db } from "./firebase";
 
@@ -9,6 +10,7 @@ type Olympiad = { id: string; title?: string; subject?: string; grade?: string |
 export default function StudentDashboard({ lang }: { lang: "kk" | "ru" }) {
   const [user, setUser] = useState<User | null>(null);
   const [olympiads, setOlympiads] = useState<Olympiad[]>([]);
+  const [authorized, setAuthorized] = useState(false);
   const [loading, setLoading] = useState(true);
   const kk = lang === "kk";
   useEffect(() => {
@@ -17,13 +19,18 @@ export default function StudentDashboard({ lang }: { lang: "kk" | "ru" }) {
       setUser(current);
       if (!current) { setLoading(false); return; }
       try {
-        const snap = await getDocs(collection(db, "olympiads"));
-        setOlympiads(snap.docs.map(d => ({ id: d.id, ...d.data() } as Olympiad)).filter(o => o.status === "published"));
+        const profile = await getDoc(doc(db, "users", current.uid));
+        setAuthorized(profile.exists() && profile.data().role === "student");
+        if (profile.exists() && profile.data().role === "student") {
+          const snap = await getDocs(collection(db, "olympiads"));
+          setOlympiads(snap.docs.map(d => ({ id: d.id, ...d.data() } as Olympiad)).filter(o => o.status === "published"));
+        }
       } finally { setLoading(false); }
     });
     return () => unsub();
   }, []);
   if (loading) return <div className="auth-page"><div className="auth-card">{kk ? "Жүктелуде…" : "Загрузка…"}</div></div>;
+  if (user && !authorized) return <Navigate to="/dashboard" replace />;
   if (!user) return <div className="auth-page"><div className="auth-card"><h1>{kk ? "Жүйеге кіріңіз" : "Войдите в систему"}</h1><Link className="btn btn-primary" to="/login">{kk ? "Кіру" : "Войти"}</Link></div></div>;
   return <div className="auth-page"><div className="dashboard-shell">
     <header className="dashboard-head"><Link className="brand" to="/"><span className="brand-mark"><Trophy /></span><span>OLYMPUS<small>STUDENT SPACE</small></span></Link><button className="btn btn-ghost" onClick={() => auth && signOut(auth)}>{kk ? "Шығу" : "Выйти"}</button></header>
