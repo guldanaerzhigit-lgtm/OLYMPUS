@@ -8,7 +8,7 @@ import { apiPost } from "./api";
 
 type Olympiad = { id: string; title?: string; subject?: string; grade?: string | number; status?: string; startDate?: string; duration?: number; schoolId?: string; questionCount?: number };
 type TestQuestion = { id: string; prompt: string; type: "single_choice" | "short_answer"; options?: { value: string; label: string }[]; points?: number };
-type Attempt = { attemptId: string; expiresAt: string; questions: TestQuestion[]; olympiad: { id: string; title: string; duration: number } };
+type Attempt = { attemptId: string; expiresAt: string; savedAnswers?: Record<string, string>; questions: TestQuestion[]; olympiad: { id: string; title: string; duration: number } };
 type Result = { olympiadId: string; olympiadTitle: string; score: number; maxScore: number; percentage: number; correctCount: number; totalQuestions: number; submittedAt: string; certificateSerial: string };
 type LeaderRow = { rank: number; studentName: string; score: number; maxScore: number; percentage: number };
 
@@ -60,10 +60,16 @@ export default function StudentDashboard({ lang }: { lang: "kk" | "ru" }) {
     try {
       const data = await apiPost<Attempt>("/api/olympiad/start", { olympiadId });
       setAttempt(data);
+      setAnswers(data.savedAnswers || {}); answersRef.current = data.savedAnswers || {};
       expiredSubmitRef.current = false;
       setTab("available");
     } catch (error) { setMessage(String((error as Error).message || error)); }
     finally { setBusy(false); }
+  }
+  async function saveDraft(nextAnswers: Record<string, string>) {
+    if (!attempt) return;
+    try { await apiPost("/api/olympiad/save", { olympiadId: attempt.olympiad.id, answers: nextAnswers }); }
+    catch (error) { setMessage(String((error as Error).message || error)); }
   }
   async function submitAttempt(auto = false) {
     if (!attempt || busy) return;
@@ -118,7 +124,7 @@ export default function StudentDashboard({ lang }: { lang: "kk" | "ru" }) {
     {message && <p className="dashboard-message">{message}</p>}
     {result && <section className="dashboard-panel result-panel"><span className="status-pill approved"><Award size={14}/> {kk ? "Тест аяқталды" : "Тест завершён"}</span><h2>{result.olympiadTitle}</h2><div className="admin-grid"><article className="admin-module"><h2>{kk ? "Ұпай" : "Баллы"}</h2><strong>{result.score}/{result.maxScore}</strong></article><article className="admin-module"><h2>{kk ? "Нәтиже" : "Результат"}</h2><strong>{result.percentage}%</strong></article><article className="admin-module"><h2>{kk ? "Дұрыс жауап" : "Верно"}</h2><strong>{result.correctCount}/{result.totalQuestions}</strong></article></div>{result.certificateSerial && <Link className="btn btn-primary" to={"/certificate/" + encodeURIComponent(result.certificateSerial)}>{kk ? "PDF сертификатты ашу" : "Открыть PDF сертификат"} <Award size={16}/></Link>}</section>}
     {attempt && <section className="dashboard-panel test-panel"><div className="dashboard-panel-head"><div><span className="section-kicker">{kk ? "ОНЛАЙН ТЕСТІЛЕУ" : "ОНЛАЙН ТЕСТИРОВАНИЕ"}</span><h2>{attempt.olympiad.title}</h2><p>{kk ? "Жауаптарыңызды белгілеңіз. Уақыт біткенде тест автоматты жіберіледі." : "Выберите ответы. По окончании времени тест отправится автоматически."}</p></div><div className="dashboard-stat"><strong><Clock3 size={18}/> {formatTime(remaining)}</strong><span>{kk ? "Қалған уақыт" : "Осталось"}</span></div></div>
-      {attempt.questions.map((q, index) => <article className="application-item question-card" key={q.id}><div className="application-info"><span className="status-pill">{index + 1}. {q.points || 1} {kk ? "ұпай" : "балл"}</span><h3>{q.prompt}</h3>{q.type === "single_choice" ? <div className="question-options">{(q.options || []).map(option => <label key={option.value}><input type="radio" name={q.id} checked={answers[q.id] === option.value} onChange={() => setAnswers(old => { const next = { ...old, [q.id]: option.value }; answersRef.current = next; return next; })}/><span>{option.label}</span></label>)}</div> : <label className="question-answer">{kk ? "Жауап" : "Ответ"}<input value={answers[q.id] || ""} onChange={event => setAnswers(old => { const next = { ...old, [q.id]: event.target.value }; answersRef.current = next; return next; })}/></label>}</div></article>)}
+      {attempt.questions.map((q, index) => <article className="application-item question-card" key={q.id}><div className="application-info"><span className="status-pill">{index + 1}. {q.points || 1} {kk ? "ұпай" : "балл"}</span><h3>{q.prompt}</h3>{q.type === "single_choice" ? <div className="question-options">{(q.options || []).map(option => <label key={option.value}><input type="radio" name={q.id} checked={answers[q.id] === option.value} onChange={() => { const next = { ...answersRef.current, [q.id]: option.value }; answersRef.current = next; setAnswers(next); void saveDraft(next); }}/><span>{option.label}</span></label>)}</div> : <label className="question-answer">{kk ? "Жауап" : "Ответ"}<input value={answers[q.id] || ""} onChange={event => { const next = { ...answersRef.current, [q.id]: event.target.value }; answersRef.current = next; setAnswers(next); }} onBlur={() => void saveDraft(answersRef.current)}/></label>}</div></article>)}
       <button className="btn btn-primary" disabled={busy} onClick={() => submitAttempt(false)}>{busy ? "…" : (kk ? "Тесті аяқтап, жіберу" : "Завершить и отправить")}</button>
     </section>}
     {!attempt && tab === "available" && <section className="dashboard-panel"><div className="dashboard-panel-head"><div><h2>{kk ? "Қолжетімді олимпиадалар" : "Доступные олимпиады"}</h2><p>{kk ? "Жарияланған олимпиаданы таңдап, онлайн тест тапсырыңыз." : "Выберите опубликованную олимпиаду и пройдите тест онлайн."}</p></div></div>
