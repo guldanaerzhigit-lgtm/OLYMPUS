@@ -146,11 +146,15 @@ async function createAttempt(token: string, olympiadId: string, caller: Caller) 
   if (!questions.length) throw new Error("NO_QUESTIONS");
   if (previous) {
     const old = docData(previous);
-    if (old.status !== "in_progress") throw new Error("ATTEMPT_ALREADY_SUBMITTED");
+    if (old.status === "submitted") {
+      const resultDoc = await getDoc(token, "olympiads/" + olympiadId + "/results/" + caller.uid);
+      return { completedResult: resultDoc ? docData(resultDoc) : null, attemptId: caller.uid, expiresAt: old.expiresAt, questions: [], olympiad: { id: olympiadId, title: olympiad.title, duration: olympiad.duration } };
+    }
+    if (old.status !== "in_progress") throw new Error("ATTEMPT_NOT_ACTIVE");
     const remaining = new Date(old.expiresAt).getTime() - now;
     if (remaining <= 0) {
-      await submitAttempt(token, olympiadId, old.answers || {}, caller);
-      throw new Error("ATTEMPT_ALREADY_SUBMITTED");
+      const completedResult = await submitAttempt(token, olympiadId, old.answers || {}, caller);
+      return { completedResult, attemptId: caller.uid, expiresAt: old.expiresAt, questions: [], olympiad: { id: olympiadId, title: olympiad.title, duration: olympiad.duration } };
     }
     return { attemptId: caller.uid, expiresAt: old.expiresAt, savedAnswers: old.answers || {}, questions, olympiad: { id: olympiadId, title: olympiad.title, duration: olympiad.duration } };
   }
