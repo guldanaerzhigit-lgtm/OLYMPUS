@@ -154,7 +154,7 @@ async function createAttempt(token: string, olympiadId: string, caller: Caller) 
   const duration = Math.max(1, Math.min(240, Number(olympiad.duration) || 60));
   const expiresAt = new Date(now + duration * 60_000).toISOString();
   const attempt = { studentUid: caller.uid, studentName: caller.profile.displayName || caller.email, schoolId: caller.profile.schoolId, status: "in_progress", startedAt: new Date(now).toISOString(), expiresAt, answers: {}, questionIds: questions.map(q => q.id) };
-  await firestore(token, attemptPath, { method: "PATCH", body: JSON.stringify({ fields: fields(attempt) }) });
+  await firestore(token, "olympiads/" + olympiadId + "/attempts?documentId=" + caller.uid, { method: "POST", body: JSON.stringify({ fields: fields(attempt) }) });
   return { attemptId: caller.uid, expiresAt, questions, olympiad: { id: olympiadId, title: olympiad.title, duration } };
 }
 async function submitAttempt(token: string, olympiadId: string, answers: Record<string, unknown>, caller: Caller) {
@@ -192,7 +192,7 @@ async function submitAttempt(token: string, olympiadId: string, answers: Record<
   const studentName = String(caller.profile.displayName || caller.email || "Оқушы");
   const result = { olympiadId, olympiadTitle: olympiad.title || "", subject: olympiad.subject || "", grade: olympiad.grade || "", studentUid: caller.uid, studentName, schoolId: caller.profile.schoolId || "", score, maxScore, percentage, correctCount, totalQuestions: questionRows.length, submittedAt: submitted, status: "verified", certificateSerial: serial };
   const certificate = { serial, studentUid: caller.uid, studentName, schoolId: caller.profile.schoolId || "", olympiadId, olympiadTitle: olympiad.title || "", subject: olympiad.subject || "", grade: olympiad.grade || "", score, maxScore, percentage, issuedAt: submitted, status: "issued" };
-  await firestore(token, "olympiads/" + olympiadId + "/results?documentId=" + caller.uid, { method: "PATCH", body: JSON.stringify({ fields: fields(result) }) });
+  await firestore(token, "olympiads/" + olympiadId + "/results?documentId=" + caller.uid, { method: "POST", body: JSON.stringify({ fields: fields(result) }) });
   await firestore(token, "certificates?documentId=" + serial, { method: "POST", body: JSON.stringify({ fields: fields(certificate) }) });
   await patchDoc(token, attemptPath, { status: "submitted", submittedAt: submitted, score, maxScore, answers: details, certificateSerial: serial, expired });
   return result;
