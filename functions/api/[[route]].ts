@@ -191,6 +191,21 @@ async function submitAttempt(token: string, olympiadId: string, answers: Record<
     return existingResult ? docData(existingResult) : { score: attempt.score || 0, maxScore: attempt.maxScore || 0, certificateSerial: attempt.certificateSerial || "" };
   }
   if (attempt.status !== "in_progress") throw new Error("ATTEMPT_NOT_ACTIVE");
+  const resultPath = "olympiads/" + olympiadId + "/results/" + caller.uid;
+  const alreadySaved = await getDoc(token, resultPath);
+  if (alreadySaved) {
+    const savedResult = docData(alreadySaved);
+    if (savedResult.certificateSerial) {
+      const certificatePath = "certificates/" + savedResult.certificateSerial;
+      const certificateDoc = await getDoc(token, certificatePath);
+      if (!certificateDoc) {
+        const certificate = { serial: savedResult.certificateSerial, studentUid: caller.uid, studentName: savedResult.studentName, schoolId: savedResult.schoolId, olympiadId, olympiadTitle: savedResult.olympiadTitle, subject: savedResult.subject, grade: savedResult.grade, score: savedResult.score, maxScore: savedResult.maxScore, percentage: savedResult.percentage, issuedAt: savedResult.submittedAt, status: "issued" };
+        await firestore(token, "certificates?documentId=" + savedResult.certificateSerial, { method: "POST", body: JSON.stringify({ fields: fields(certificate) }) });
+      }
+    }
+    await patchDoc(token, attemptPath, { status: "submitted", submittedAt: savedResult.submittedAt, score: savedResult.score, maxScore: savedResult.maxScore, certificateSerial: savedResult.certificateSerial || "" });
+    return savedResult;
+  }
   const olympiadDoc = await getDoc(token, "olympiads/" + olympiadId);
   if (!olympiadDoc) throw new Error("OLYMPIAD_NOT_FOUND");
   const olympiad = docData(olympiadDoc);
