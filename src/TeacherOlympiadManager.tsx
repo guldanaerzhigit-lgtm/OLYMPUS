@@ -3,7 +3,7 @@ import { collection, getDocs } from "firebase/firestore";
 import { apiPost } from "./api";
 import { db } from "./firebase";
 
-type Olympiad = { id: string; title?: string; subject?: string; grade?: number; duration?: number; status?: string; questionCount?: number; schoolId?: string };
+type Olympiad = { id: string; title?: string; subject?: string; grade?: number; duration?: number; status?: string; questionCount?: number; schoolId?: string; createdAt?: string };
 type RankRow = { rank: number; studentName: string; score: number; maxScore: number; percentage: number };
 
 export default function TeacherOlympiadManager({ lang, schoolId }: { lang: "kk" | "ru"; schoolId: string }) {
