@@ -3,8 +3,8 @@ import { Link, Navigate, Route, Routes, useNavigate } from "react-router-dom";
 import { onAuthStateChanged, signInWithEmailAndPassword, signOut, type User } from "firebase/auth";
 import { addDoc, collection, doc, getDoc, getDocs, serverTimestamp, setDoc, updateDoc, writeBatch } from "firebase/firestore";
 import { ArrowRight, Award, BookOpen, Building2, CheckCircle2, ChevronDown, Globe2, GraduationCap, LockKeyhole, Menu, ShieldCheck, Sparkles, Trophy, Users, X } from "lucide-react";
-import { auth, db, firebaseConfigured, functions } from "./firebase";
-import { httpsCallable } from "firebase/functions";
+import { auth, db, firebaseConfigured } from "./firebase";
+import { createInvitation } from "./invitations";
 import InviteRegistration from "./InviteRegistration";
 import StudentDashboard from "./StudentDashboard";
 import * as XLSX from "xlsx";
@@ -127,11 +127,9 @@ function Dashboard({lang}:{lang:Lang}) {
     finally{setBusyId("");}
   }
   async function createInvite(e:React.FormEvent){
-    e.preventDefault();if(!functions)return;setMessage("");
+    e.preventDefault();setMessage("");
     try{
-      const invite=httpsCallable(functions,"createRoleInvitation");
-      const result=await invite({email:inviteForm.email.trim(),schoolId:inviteForm.schoolId,role:"school_admin",language:lang});
-      const data=result.data as {inviteUrl:string;emailSent:boolean};
+      const data=await createInvitation({email:inviteForm.email.trim(),schoolId:inviteForm.schoolId,role:"school_admin",language:lang});
       setInviteForm({email:"",schoolId:"",role:"school_admin"});await reloadData();
       setMessage((kk?"Шақыру дайын. ":"Приглашение создано. ")+(data.emailSent?(kk?"Email жіберілді. ":"Письмо отправлено. "):(kk?"Email қызметі қосылмаған, сілтемені қолмен жіберіңіз: ":"Email-сервис не подключён, отправьте ссылку вручную: "))+data.inviteUrl);
     }catch(err){setMessage((kk?"Шақыру жіберілмеді: ":"Не удалось создать приглашение: ")+String((err as Error).message||""));}
@@ -231,10 +229,8 @@ function SchoolAdmin({lang}:{lang:Lang}) {
     e.preventDefault();if(!db||!schoolId)return;
     try{
       if(studentForm.email.trim()){
-        const invite=httpsCallable(functions,"createRoleInvitation");
-        const result=await invite({email:studentForm.email.trim(),schoolId,role:"student",displayName:studentForm.fullName,grade:studentForm.grade,className:studentForm.className,language:lang});
-        const data=result.data as {inviteUrl:string;emailSent:boolean};
-        await addDoc(collection(db,"schools",schoolId,"students"),{...studentForm,grade:Number(studentForm.grade),status:"invited",invitationId:(result.data as {invitationId:string}).invitationId,createdAt:serverTimestamp(),createdBy:user?.uid||""});
+        const data=await createInvitation({email:studentForm.email.trim(),schoolId,role:"student",displayName:studentForm.fullName,grade:studentForm.grade,className:studentForm.className,language:lang});
+        await addDoc(collection(db,"schools",schoolId,"students"),{...studentForm,grade:Number(studentForm.grade),status:"invited",invitationId:data.invitationId,createdAt:serverTimestamp(),createdBy:user?.uid||""});
         setMessage((kk?"Оқушыға шақыру дайын. ":"Приглашение ученику создано. ")+(data.emailSent?(kk?"Email жіберілді. ":"Письмо отправлено. "):(kk?"Сілтемені қолмен жіберіңіз: ":"Отправьте ссылку вручную: "))+data.inviteUrl);
       }else{
         await addDoc(collection(db,"schools",schoolId,"students"),{...studentForm,grade:Number(studentForm.grade),status:"pending_account",createdAt:serverTimestamp(),createdBy:user?.uid||""});
@@ -244,11 +240,9 @@ function SchoolAdmin({lang}:{lang:Lang}) {
     }catch(err){setMessage((kk?"Оқушыны қосу мүмкін болмады: ":"Не удалось добавить ученика: ")+String((err as Error).message||""));}
   }
   async function inviteTeacher(e:React.FormEvent){
-    e.preventDefault();if(!db||!schoolId||!functions)return;
+    e.preventDefault();if(!db||!schoolId)return;
     try{
-      const invite=httpsCallable(functions,"createRoleInvitation");
-      const result=await invite({email:teacherForm.email.trim(),schoolId,role:"teacher",subject:teacherForm.subject,language:lang});
-      const data=result.data as {inviteUrl:string;emailSent:boolean;invitationId:string};
+      const data=await createInvitation({email:teacherForm.email.trim(),schoolId,role:"teacher",subject:teacherForm.subject,language:lang});
       await addDoc(collection(db,"schools",schoolId,"teacherInvites"),{email:teacherForm.email.trim().toLowerCase(),subject:teacherForm.subject,status:"pending",invitationId:data.invitationId,createdAt:serverTimestamp(),createdBy:user?.uid||""});
       setTeacherForm({email:"",subject:""});await reload(schoolId);
       setMessage((kk?"Мұғалімге шақыру дайын. ":"Приглашение учителю создано. ")+(data.emailSent?(kk?"Email жіберілді. ":"Письмо отправлено. "):(kk?"Email қызметі қосылмаған, сілтемені қолмен жіберіңіз: ":"Email-сервис не подключён, отправьте ссылку вручную: "))+data.inviteUrl);
