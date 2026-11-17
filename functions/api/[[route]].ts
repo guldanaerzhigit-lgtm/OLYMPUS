@@ -148,14 +148,33 @@ async function createAttempt(token: string, olympiadId: string, caller: Caller) 
     const old = docData(previous);
     if (old.status !== "in_progress") throw new Error("ATTEMPT_ALREADY_SUBMITTED");
     const remaining = new Date(old.expiresAt).getTime() - now;
-    if (remaining <= 0) throw new Error("ATTEMPT_EXPIRED");
-    return { attemptId: caller.uid, expiresAt: old.expiresAt, questions, olympiad: { id: olympiadId, title: olympiad.title, duration: olympiad.duration } };
+    if (remaining <= 0) {
+      await submitAttempt(token, olympiadId, old.answers || {}, caller);
+      throw new Error("ATTEMPT_ALREADY_SUBMITTED");
+    }
+    return { attemptId: caller.uid, expiresAt: old.expiresAt, savedAnswers: old.answers || {}, questions, olympiad: { id: olympiadId, title: olympiad.title, duration: olympiad.duration } };
   }
   const duration = Math.max(1, Math.min(240, Number(olympiad.duration) || 60));
   const expiresAt = new Date(now + duration * 60_000).toISOString();
   const attempt = { studentUid: caller.uid, studentName: caller.profile.displayName || caller.email, schoolId: caller.profile.schoolId, status: "in_progress", startedAt: new Date(now).toISOString(), expiresAt, answers: {}, questionIds: questions.map(q => q.id) };
   await firestore(token, "olympiads/" + olympiadId + "/attempts?documentId=" + caller.uid, { method: "POST", body: JSON.stringify({ fields: fields(attempt) }) });
   return { attemptId: caller.uid, expiresAt, questions, olympiad: { id: olympiadId, title: olympiad.title, duration } };
+}
+async function saveAttemptAnswers(token: string, olympiadId: string, answers: Record<string, unknown>, caller: Caller) {
+  if (caller.profile.role !== "student") throw new Error("FORBIDDEN");
+  const attemptPath = "olympiads/" + olympiadId + "/attempts/" + caller.uid;
+  const attemptDoc = await getDoc(token, attemptPath);
+  if (!attemptDoc) throw new Error("ATTEMPT_NOT_FOUND");
+  const attempt = docData(attemptDoc);
+  if (attempt.status !== "in_progress") throw new Error("ATTEMPT_NOT_ACTIVE");
+  if (Date.now() > new Date(attempt.expiresAt).getTime()) throw new Error("ATTEMPT_EXPIRED");
+  const allowed = new Set<string>(Array.isArray(attempt.questionIds) ? attempt.questionIds : []);
+  const merged: Record<string, string> = { ...(attempt.answers || {}) };
+  for (const [questionId, value] of Object.entries(answers || {}).slice(0, 100)) {
+    if (allowed.has(questionId)) merged[questionId] = String(value ?? "").slice(0, 1000);
+  }
+  await patchDoc(token, attemptPath, { answers: merged, updatedAt: new Date().toISOString() });
+  return { saved: true, savedCount: Object.keys(merged).length };
 }
 async function submitAttempt(token: string, olympiadId: string, answers: Record<string, unknown>, caller: Caller) {
   if (caller.profile.role !== "student") throw new Error("FORBIDDEN");
@@ -181,7 +200,7 @@ async function submitAttempt(token: string, olympiadId: string, answers: Record<
   for (const question of questionRows) {
     const points = Math.max(1, Number(question.points) || 1);
     maxScore += points;
-    const given = expired ? "" : cleanAnswer(answers?.[question.id]);
+    const given = cleanAnswer(expired ? attempt.answers?.[question.id] : (answers?.[question.id] ?? attempt.answers?.[question.id]));
     const correct = cleanAnswer(question.answer);
     const isCorrect = !!given && given === correct;
     if (isCorrect) { score += points; correctCount += 1; }
@@ -218,6 +237,10 @@ async function handleOlympiadPost(path: string, request: Request, body: any, tok
   }
   if (path === "/api/olympiad/start") {
     try { return json(await createAttempt(token, String(body.olympiadId || ""), caller)); }
+    catch (error) { throw error; }
+  }
+  if (path === "/api/olympiad/save") {
+    try { return json(await saveAttemptAnswers(token, String(body.olympiadId || ""), body.answers || {}, caller)); }
     catch (error) { throw error; }
   }
   if (path === "/api/olympiad/submit") {
