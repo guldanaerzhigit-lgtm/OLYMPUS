@@ -136,6 +136,7 @@ async function createAttempt(token: string, olympiadId: string, caller: Caller) 
   const olympiad = docData(olympiadDoc);
   if (olympiad.status !== "published") throw new Error("OLYMPIAD_NOT_OPEN");
   if (olympiad.schoolId && olympiad.schoolId !== caller.profile.schoolId) throw new Error("FORBIDDEN");
+  if (olympiad.grade && caller.profile.grade && Number(olympiad.grade) !== Number(caller.profile.grade)) throw new Error("GRADE_MISMATCH");
   const now = Date.now();
   const startAt = olympiad.startDate ? new Date(olympiad.startDate).getTime() : 0;
   if (Number.isFinite(startAt) && startAt > now) throw new Error("OLYMPIAD_NOT_STARTED");
@@ -249,7 +250,7 @@ async function handleOlympiadPost(path: string, request: Request, body: any, tok
     return json({ id, ...olympiad });
   }
   if (path === "/api/teacher/question" || path === "/api/admin/question") {
-    const allowed = path === "/api/admin/question" ? caller.profile.role === "super_admin" : ["teacher", "school_admin"].includes(String(caller.profile.role));
+    const allowed = path === "/api/admin/question" ? caller.profile.role === "super_admin" : caller.profile.role === "teacher";
     if (!allowed) return fail("Not allowed", 403);
     try { return json(await createOlympiadQuestion(token, String(body.olympiadId || ""), body, caller), 201); }
     catch (error) { throw error; }
@@ -303,6 +304,10 @@ async function handleOlympiadPost(path: string, request: Request, body: any, tok
   }
   if (path === "/api/olympiad/leaderboard") {
     const olympiadId = String(body.olympiadId || "");
+    const olympiadDoc = await getDoc(token, "olympiads/" + olympiadId);
+    if (!olympiadDoc) return fail("OLYMPIAD_NOT_FOUND", 404);
+    const olympiad = docData(olympiadDoc);
+    if (olympiad.schoolId && caller.profile.role !== "super_admin" && caller.profile.schoolId !== olympiad.schoolId) return fail("FORBIDDEN", 403);
     const rows = await collectionDocs(token, "olympiads/" + olympiadId + "/results");
     rows.sort((a, b) => Number(b.percentage) - Number(a.percentage) || String(a.submittedAt).localeCompare(String(b.submittedAt)));
     return json({ rows: rows.slice(0, 100).map((row, index) => ({ rank: index + 1, studentName: row.studentName, schoolId: row.schoolId, score: row.score, maxScore: row.maxScore, percentage: row.percentage, submittedAt: row.submittedAt })) });
@@ -382,7 +387,7 @@ export async function onRequestPost({ request, env }: Ctx) {
     if (["PROFILE_NOT_FOUND", "FORBIDDEN"].includes(message)) return fail(message, 403);
     if (message === "OLYMPIAD_NOT_FOUND" || message === "ATTEMPT_NOT_FOUND") return fail(message, 404);
     if (["OLYMPIAD_NOT_OPEN", "OLYMPIAD_NOT_STARTED", "ATTEMPT_ALREADY_SUBMITTED", "ATTEMPT_EXPIRED", "ATTEMPT_NOT_ACTIVE", "QUESTIONS_LOCKED", "NO_QUESTIONS"].includes(message)) return fail(message, 409);
-    if (["SCHOOL_INACTIVE", "SCHOOL_REQUIRED"].includes(message)) return fail(message, 403);
+    if (["SCHOOL_INACTIVE", "SCHOOL_REQUIRED", "GRADE_MISMATCH"].includes(message)) return fail(message, 403);
     if (["INVALID_QUESTION", "INVALID_OPTIONS_OR_ANSWER"].includes(message)) return fail(message, 400);
     return fail(message.includes("EMAIL_EXISTS") ? "An account with this email already exists" : "Server error: " + message, 500);
   }
