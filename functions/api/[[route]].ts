@@ -80,10 +80,177 @@ async function sendInvite(env: Env, email: string, role: string, url: string, la
   if (!res.ok) throw new Error("Email provider error");
   return true;
 }
+
+type Caller = { uid: string; email: string; profile: Record<string, any> };
+async function callerProfile(request: Request, token: string, env: Env): Promise<Caller> {
+  const bearer = request.headers.get("authorization") || "";
+  const idToken = bearer.startsWith("Bearer ") ? bearer.slice(7) : "";
+  if (!idToken) throw new Error("UNAUTHENTICATED");
+  const authUser = await lookupUser(idToken, env);
+  const profileDoc = await getDoc(token, "users/" + authUser.localId);
+  if (!profileDoc) throw new Error("PROFILE_NOT_FOUND");
+  return { uid: authUser.localId, email: authUser.email || "", profile: docData(profileDoc) };
+}
+async function collectionDocs(token: string, path: string): Promise<any[]> {
+  const response = await firestore(token, path + "?pageSize=200");
+  return (response.documents || []).map((document: any) => ({
+    id: document.name.split("/").pop(),
+    ...docData(document)
+  }));
+}
+const cleanAnswer = (value: unknown) => String(value ?? "").trim().toLocaleLowerCase();
+function publicQuestion(question: Record<string, any>) {
+  const { answer, correctAnswer, solution, explanation, ...safe } = question;
+  return safe;
+}
+async function createOlympiadQuestion(token: string, olympiadId: string, input: Record<string, any>, caller: Caller) {
+  const olympiadDoc = await getDoc(token, "olympiads/" + olympiadId);
+  if (!olympiadDoc) throw new Error("OLYMPIAD_NOT_FOUND");
+  const olympiad = docData(olympiadDoc);
+  if (olympiad.status !== "draft") throw new Error("QUESTIONS_LOCKED");
+  if (caller.profile.role === "teacher" && caller.profile.schoolId !== olympiad.schoolId) throw new Error("FORBIDDEN");
+  if (!["teacher", "super_admin"].includes(String(caller.profile.role))) throw new Error("FORBIDDEN");
+  const prompt = String(input.prompt || "").trim();
+  const type = input.type === "single_choice" ? "single_choice" : "short_answer";
+  const answer = String(input.answer || "").trim();
+  const points = Math.max(1, Math.min(100, Number(input.points) || 1));
+  const options = Array.isArray(input.options) ? input.options.slice(0, 8).map((option: any, index: number) => ({
+    value: String(option.value ?? String.fromCharCode(65 + index)).trim(),
+    label: String(option.label ?? option.value ?? "").trim()
+  })).filter((option: any) => option.value && option.label) : [];
+  if (prompt.length < 3 || !answer) throw new Error("INVALID_QUESTION");
+  if (type === "single_choice" && (options.length < 2 || !options.some((option: any) => option.value === answer))) throw new Error("INVALID_OPTIONS_OR_ANSWER");
+  const id = crypto.randomUUID();
+  const question = { prompt, type, options: type === "single_choice" ? options : [], answer, points, order: Number(input.order) || Date.now(), createdBy: caller.uid, createdAt: new Date().toISOString() };
+  await firestore(token, "olympiads/" + olympiadId + "/questions?documentId=" + id, { method: "POST", body: JSON.stringify({ fields: fields(question) }) });
+  await patchDoc(token, "olympiads/" + olympiadId, { questionCount: (Number(olympiad.questionCount) || 0) + 1, updatedAt: new Date().toISOString() });
+  return { id, ...publicQuestion(question) };
+}
+async function createAttempt(token: string, olympiadId: string, caller: Caller) {
+  if (caller.profile.role !== "student") throw new Error("FORBIDDEN");
+  if (!caller.profile.schoolId) throw new Error("SCHOOL_REQUIRED");
+  const schoolDoc = await getDoc(token, "schools/" + caller.profile.schoolId);
+  if (!schoolDoc || docData(schoolDoc).status !== "active") throw new Error("SCHOOL_INACTIVE");
+  const olympiadDoc = await getDoc(token, "olympiads/" + olympiadId);
+  if (!olympiadDoc) throw new Error("OLYMPIAD_NOT_FOUND");
+  const olympiad = docData(olympiadDoc);
+  if (olympiad.status !== "published") throw new Error("OLYMPIAD_NOT_OPEN");
+  if (olympiad.schoolId && olympiad.schoolId !== caller.profile.schoolId) throw new Error("FORBIDDEN");
+  const now = Date.now();
+  const startAt = olympiad.startDate ? new Date(olympiad.startDate).getTime() : 0;
+  if (Number.isFinite(startAt) && startAt > now) throw new Error("OLYMPIAD_NOT_STARTED");
+  const attemptPath = "olympiads/" + olympiadId + "/attempts/" + caller.uid;
+  const previous = await getDoc(token, attemptPath);
+  const questionRows = await collectionDocs(token, "olympiads/" + olympiadId + "/questions");
+  const questions = questionRows.sort((a, b) => Number(a.order || 0) - Number(b.order || 0)).map(publicQuestion);
+  if (!questions.length) throw new Error("NO_QUESTIONS");
+  if (previous) {
+    const old = docData(previous);
+    if (old.status !== "in_progress") throw new Error("ATTEMPT_ALREADY_SUBMITTED");
+    const remaining = new Date(old.expiresAt).getTime() - now;
+    if (remaining <= 0) throw new Error("ATTEMPT_EXPIRED");
+    return { attemptId: caller.uid, expiresAt: old.expiresAt, questions, olympiad: { id: olympiadId, title: olympiad.title, duration: olympiad.duration } };
+  }
+  const duration = Math.max(1, Math.min(240, Number(olympiad.duration) || 60));
+  const expiresAt = new Date(now + duration * 60_000).toISOString();
+  const attempt = { studentUid: caller.uid, studentName: caller.profile.displayName || caller.email, schoolId: caller.profile.schoolId, status: "in_progress", startedAt: new Date(now).toISOString(), expiresAt, answers: {}, questionIds: questions.map(q => q.id) };
+  await firestore(token, attemptPath, { method: "PATCH", body: JSON.stringify({ fields: fields(attempt) }) });
+  return { attemptId: caller.uid, expiresAt, questions, olympiad: { id: olympiadId, title: olympiad.title, duration } };
+}
+async function submitAttempt(token: string, olympiadId: string, answers: Record<string, unknown>, caller: Caller) {
+  if (caller.profile.role !== "student") throw new Error("FORBIDDEN");
+  const attemptPath = "olympiads/" + olympiadId + "/attempts/" + caller.uid;
+  const attemptDoc = await getDoc(token, attemptPath);
+  if (!attemptDoc) throw new Error("ATTEMPT_NOT_FOUND");
+  const attempt = docData(attemptDoc);
+  if (attempt.status === "submitted") {
+    const existingResult = await getDoc(token, "olympiads/" + olympiadId + "/results/" + caller.uid);
+    return existingResult ? docData(existingResult) : { score: attempt.score || 0, maxScore: attempt.maxScore || 0, certificateSerial: attempt.certificateSerial || "" };
+  }
+  if (attempt.status !== "in_progress") throw new Error("ATTEMPT_NOT_ACTIVE");
+  const olympiadDoc = await getDoc(token, "olympiads/" + olympiadId);
+  if (!olympiadDoc) throw new Error("OLYMPIAD_NOT_FOUND");
+  const olympiad = docData(olympiadDoc);
+  const questionRows = await collectionDocs(token, "olympiads/" + olympiadId + "/questions");
+  let score = 0;
+  let maxScore = 0;
+  let correctCount = 0;
+  const details: Record<string, any> = {};
+  const submitted = new Date().toISOString();
+  const expired = Date.now() > new Date(attempt.expiresAt).getTime();
+  for (const question of questionRows) {
+    const points = Math.max(1, Number(question.points) || 1);
+    maxScore += points;
+    const given = expired ? "" : cleanAnswer(answers?.[question.id]);
+    const correct = cleanAnswer(question.answer);
+    const isCorrect = !!given && given === correct;
+    if (isCorrect) { score += points; correctCount += 1; }
+    details[question.id] = { answer: String(answers?.[question.id] ?? "").slice(0, 1000), correct: isCorrect, points: isCorrect ? points : 0 };
+  }
+  const percentage = maxScore ? Math.round(score / maxScore * 10000) / 100 : 0;
+  const serial = "OLY-" + new Date().getFullYear() + "-" + crypto.randomUUID().replace(/-/g, "").slice(0, 12).toUpperCase();
+  const studentName = String(caller.profile.displayName || caller.email || "Оқушы");
+  const result = { olympiadId, olympiadTitle: olympiad.title || "", subject: olympiad.subject || "", grade: olympiad.grade || "", studentUid: caller.uid, studentName, schoolId: caller.profile.schoolId || "", score, maxScore, percentage, correctCount, totalQuestions: questionRows.length, submittedAt: submitted, status: "verified", certificateSerial: serial };
+  const certificate = { serial, studentUid: caller.uid, studentName, schoolId: caller.profile.schoolId || "", olympiadId, olympiadTitle: olympiad.title || "", subject: olympiad.subject || "", grade: olympiad.grade || "", score, maxScore, percentage, issuedAt: submitted, status: "issued" };
+  await firestore(token, "olympiads/" + olympiadId + "/results?documentId=" + caller.uid, { method: "PATCH", body: JSON.stringify({ fields: fields(result) }) });
+  await firestore(token, "certificates?documentId=" + serial, { method: "POST", body: JSON.stringify({ fields: fields(certificate) }) });
+  await patchDoc(token, attemptPath, { status: "submitted", submittedAt: submitted, score, maxScore, answers: details, certificateSerial: serial, expired });
+  return result;
+}
+async function handleOlympiadPost(path: string, request: Request, body: any, token: string, env: Env) {
+  const caller = await callerProfile(request, token, env);
+  if (path === "/api/teacher/olympiad") {
+    if (caller.profile.role !== "teacher" || !caller.profile.schoolId) return fail("Teacher account required", 403);
+    const title = String(body.title || "").trim();
+    if (title.length < 3) return fail("Olympiad title is required");
+    const schoolDoc = await getDoc(token, "schools/" + caller.profile.schoolId);
+    if (!schoolDoc || docData(schoolDoc).status !== "active") return fail("School is not active", 403);
+    const id = crypto.randomUUID();
+    const olympiad = { title, subject: String(body.subject || "Математика"), grade: Number(body.grade) || 5, duration: Math.max(1, Math.min(240, Number(body.duration) || 60)), startDate: String(body.startDate || ""), schoolId: caller.profile.schoolId, createdBy: caller.uid, createdByRole: "teacher", questionCount: 0, status: "draft", createdAt: new Date().toISOString() };
+    await firestore(token, "olympiads?documentId=" + id, { method: "POST", body: JSON.stringify({ fields: fields(olympiad) }) });
+    return json({ id, ...olympiad });
+  }
+  if (path === "/api/teacher/question" || path === "/api/admin/question") {
+    const allowed = path === "/api/admin/question" ? caller.profile.role === "super_admin" : ["teacher", "school_admin"].includes(String(caller.profile.role));
+    if (!allowed) return fail("Not allowed", 403);
+    try { return json(await createOlympiadQuestion(token, String(body.olympiadId || ""), body, caller), 201); }
+    catch (error) { throw error; }
+  }
+  if (path === "/api/olympiad/start") {
+    try { return json(await createAttempt(token, String(body.olympiadId || ""), caller)); }
+    catch (error) { throw error; }
+  }
+  if (path === "/api/olympiad/submit") {
+    try { return json(await submitAttempt(token, String(body.olympiadId || ""), body.answers || {}, caller)); }
+    catch (error) { throw error; }
+  }
+  if (path === "/api/student/history") {
+    if (caller.profile.role !== "student") return fail("Student account required", 403);
+    const olympiads = await collectionDocs(token, "olympiads");
+    const history = [];
+    for (const olympiad of olympiads) {
+      const resultDoc = await getDoc(token, "olympiads/" + olympiad.id + "/results/" + caller.uid);
+      if (resultDoc) history.push(docData(resultDoc));
+    }
+    return json({ history: history.sort((a, b) => String(b.submittedAt).localeCompare(String(a.submittedAt))) });
+  }
+  if (path === "/api/olympiad/leaderboard") {
+    const olympiadId = String(body.olympiadId || "");
+    const rows = await collectionDocs(token, "olympiads/" + olympiadId + "/results");
+    rows.sort((a, b) => Number(b.percentage) - Number(a.percentage) || String(a.submittedAt).localeCompare(String(b.submittedAt)));
+    return json({ rows: rows.slice(0, 100).map((row, index) => ({ rank: index + 1, studentName: row.studentName, schoolId: row.schoolId, score: row.score, maxScore: row.maxScore, percentage: row.percentage, submittedAt: row.submittedAt })) });
+  }
+  return fail("Not found", 404);
+}
+
 export async function onRequestPost({ request, env }: Ctx) {
   try {
     const body = await request.json() as any;
     const token = await accessToken(env);
+    const route = new URL(request.url).pathname;
+    if (route.startsWith("/api/teacher/") || route.startsWith("/api/admin/") || route.startsWith("/api/olympiad/") || route === "/api/student/history") {
+      return await handleOlympiadPost(route, request, body, token, env);
+    }
     if (new URL(request.url).pathname === "/api/invitations") {
       const bearer = request.headers.get("authorization") || "";
       const idToken = bearer.startsWith("Bearer ") ? bearer.slice(7) : "";
@@ -145,6 +312,30 @@ export async function onRequestPost({ request, env }: Ctx) {
   } catch (error) {
     const message = String((error as Error).message || error);
     if (message === "UNAUTHENTICATED") return fail("Sign in required", 401);
+    if (["PROFILE_NOT_FOUND", "FORBIDDEN"].includes(message)) return fail(message, 403);
+    if (message === "OLYMPIAD_NOT_FOUND" || message === "ATTEMPT_NOT_FOUND") return fail(message, 404);
+    if (["OLYMPIAD_NOT_OPEN", "OLYMPIAD_NOT_STARTED", "ATTEMPT_ALREADY_SUBMITTED", "ATTEMPT_EXPIRED", "ATTEMPT_NOT_ACTIVE", "QUESTIONS_LOCKED", "NO_QUESTIONS"].includes(message)) return fail(message, 409);
+    if (["SCHOOL_INACTIVE", "SCHOOL_REQUIRED"].includes(message)) return fail(message, 403);
+    if (["INVALID_QUESTION", "INVALID_OPTIONS_OR_ANSWER"].includes(message)) return fail(message, 400);
     return fail(message.includes("EMAIL_EXISTS") ? "An account with this email already exists" : "Server error: " + message, 500);
+  }
+}
+
+
+export async function onRequestGet({ request, env }: Ctx) {
+  try {
+    const route = new URL(request.url);
+    if (route.pathname === "/api/certificates/verify") {
+      const serial = String(route.searchParams.get("serial") || "").trim();
+      if (!serial || serial.length > 80) return fail("Certificate serial is required", 400);
+      const token = await accessToken(env);
+      const certificate = await getDoc(token, "certificates/" + encodeURIComponent(serial));
+      if (!certificate) return fail("Certificate not found", 404);
+      const data = docData(certificate);
+      return json({ valid: data.status === "issued", serial: data.serial, studentName: data.studentName, olympiadTitle: data.olympiadTitle, subject: data.subject, grade: data.grade, score: data.score, maxScore: data.maxScore, percentage: data.percentage, issuedAt: data.issuedAt });
+    }
+    return fail("Not found", 404);
+  } catch (error) {
+    return fail(String((error as Error).message || error), 500);
   }
 }
