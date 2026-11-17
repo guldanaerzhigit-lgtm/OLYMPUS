@@ -107,6 +107,7 @@ function Dashboard({lang}:{lang:Lang}) {
     try{
       const schoolRef=doc(collection(db,"schools"));
       await setDoc(schoolRef,{name:a.school||"",email:a.email||"",city:a.city||"",contact:a.contact||"",status:"active",createdAt:serverTimestamp(),approvedAt:serverTimestamp()});
+      await writeAudit("school_approved",{id:schoolRef.id,name:a.school||"",city:a.city||"",email:a.email||"",status:"active"});
       await updateDoc(doc(db,"schoolApplications",a.id),{status:"approved",schoolId:schoolRef.id,reviewedAt:serverTimestamp()});
       await reloadData();setMessage(kk?"Мектеп өтінімі мақұлданды. Мектеп құрылды.":"Заявка одобрена. Школа создана.");
     }catch{setMessage(kk?"Мақұлдау орындалмады. Firestore ережелерін тексеріңіз.":"Не удалось одобрить заявку. Проверьте правила Firestore.");}
@@ -147,7 +148,8 @@ function Dashboard({lang}:{lang:Lang}) {
     try{
       const name=manualSchoolForm.name.trim();
       if(!name)throw new Error(kk?"Мектеп атауын енгізіңіз.":"Введите название школы.");
-      await addDoc(collection(db,"schools"),{name,city:manualSchoolForm.city.trim(),email:manualSchoolForm.email.trim().toLowerCase(),contact:manualSchoolForm.contact.trim(),status:"active",createdAt:serverTimestamp(),approvedAt:serverTimestamp(),createdBy:user?.uid||"",source:"manual"});
+      const created=await addDoc(collection(db,"schools"),{name,city:manualSchoolForm.city.trim(),email:manualSchoolForm.email.trim().toLowerCase(),contact:manualSchoolForm.contact.trim(),status:"active",createdAt:serverTimestamp(),approvedAt:serverTimestamp(),createdBy:user?.uid||"",source:"manual"});
+      await writeAudit("school_created_manual",{id:created.id,name,city:manualSchoolForm.city.trim(),email:manualSchoolForm.email.trim().toLowerCase(),status:"active"});
       setManualSchoolForm({name:"",city:"",email:"",contact:""});setShowManualSchoolForm(false);
       await reloadData();setMessage(kk?"Мектеп сәтті тіркелді. Енді оған мектеп әкімшісін шақыра аласыз.":"Школа успешно зарегистрирована. Теперь можно пригласить её администратора.");
     }catch(err){setMessage((kk?"Мектепті тіркеу мүмкін болмады: ":"Не удалось зарегистрировать школу: ")+String((err as Error).message||""));}
