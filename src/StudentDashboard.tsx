@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, Navigate } from "react-router-dom";
 import { onAuthStateChanged, signOut, type User } from "firebase/auth";
-import { collection, doc, getDoc, getDocs } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, query, where } from "firebase/firestore";
 import { Award, Clock3, Medal, Trophy } from "lucide-react";
 import { auth, db } from "./firebase";
 import { apiPost } from "./api";
@@ -45,7 +45,8 @@ export default function StudentDashboard({ lang }: { lang: "kk" | "ru" }) {
         const isStudent = profile.exists() && profile.data().role === "student";
         setAuthorized(isStudent);
         if (isStudent) {
-          const [snap] = await Promise.all([getDocs(collection(db, "olympiads"))]);
+          const olympiadQuery = query(collection(db, "olympiads"), where("status", "in", ["published", "archived"]));
+          const [snap] = await Promise.all([getDocs(olympiadQuery)]);
           setOlympiads(snap.docs.map(d => ({ id: d.id, ...d.data() } as Olympiad)).filter(o => ["published", "archived"].includes(o.status || "")));
           await refreshHistory();
         }
