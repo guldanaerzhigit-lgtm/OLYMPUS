@@ -79,6 +79,13 @@ export default function StudentDashboard({ lang }: { lang: "kk" | "ru" }) {
     try { await apiPost("/api/olympiad/save", { olympiadId: attempt.olympiad.id, answers: nextAnswers }); }
     catch (error) { setMessage(String((error as Error).message || error)); }
   }
+  useEffect(() => {
+    if (!attempt) return;
+    const timer = window.setInterval(() => {
+      if (Object.keys(answersRef.current).length) void saveDraft(answersRef.current);
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, [attempt]);
   async function submitAttempt(auto = false) {
     if (!attempt || busy) return;
     setBusy(true); setMessage("");
