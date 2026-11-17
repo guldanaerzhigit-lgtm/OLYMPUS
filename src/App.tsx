@@ -134,6 +134,7 @@ function Dashboard({lang}:{lang:Lang}) {
   if(loading)return <div className="auth-page"><div className="auth-card">OLYMPUS · {kk?"Жүктелуде…":"Загрузка…"}</div></div>;
   if(!user)return <div className="auth-page"><div className="auth-card"><h1>{kk?"Жүйеге кіріңіз":"Войдите в систему"}</h1><Link className="btn btn-primary" to="/login">{kk?"Кіру":"Войти"}</Link></div></div>;
   if(role==="school_admin")return <Navigate to="/school" replace/>;
+  if(role==="teacher")return <Navigate to="/teacher" replace/>;
   if(role!=="super_admin")return <div className="auth-page"><div className="auth-card"><h1>{kk?"Қолжетімділік шектеулі":"Нет доступа"}</h1><p>{kk?"Бұл аккаунтқа Super Admin рөлі берілмеген.":"У этой учётной записи нет роли Super Admin."}</p><button className="btn btn-ghost" onClick={()=>signOut(auth!)}>{kk?"Шығу":"Выйти"}</button></div></div>;
   const pending=apps.filter(a=>(a.status||"pending")==="pending");
   const activeSchools=schools.filter(s=>s.status==="active");
