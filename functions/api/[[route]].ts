@@ -238,6 +238,15 @@ async function submitAttempt(token: string, olympiadId: string, answers: Record<
 }
 async function handleOlympiadPost(path: string, request: Request, body: any, token: string, env: Env) {
   const caller = await callerProfile(request, token, env);
+  if (path === "/api/teacher/olympiads") {
+    if (caller.profile.role !== "teacher" || !caller.profile.schoolId) return fail("Teacher account required", 403);
+    const schoolDoc = await getDoc(token, "schools/" + caller.profile.schoolId);
+    if (!schoolDoc || docData(schoolDoc).status !== "active") return fail("School is not active", 403);
+    const rows = await collectionDocs(token, "olympiads");
+    const items = rows.filter(item => item.schoolId === caller.profile.schoolId)
+      .sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
+    return json({ items });
+  }
   if (path === "/api/teacher/olympiad") {
     if (caller.profile.role !== "teacher" || !caller.profile.schoolId) return fail("Teacher account required", 403);
     const title = String(body.title || "").trim();
