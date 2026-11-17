@@ -50,7 +50,12 @@ service cloud.firestore {
     }
 
     match /olympiads/{olympiadId} {
-      allow read: if signedIn();
+      // Students can only discover published or archived events.
+      // Draft metadata is limited to the owning school's staff and platform admins.
+      allow read: if isPlatformAdmin()
+        || (signedIn() && resource.data.status in ['published', 'archived'])
+        || (signedIn() && userDoc().schoolId == resource.data.schoolId
+          && userDoc().role in ['teacher', 'school_admin']);
       allow create, update, delete: if isPlatformAdmin();
     }
 
