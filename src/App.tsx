@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link, Route, Routes, useNavigate } from "react-router-dom";
+import { Link, Navigate, Route, Routes, useNavigate } from "react-router-dom";
 import { onAuthStateChanged, signInWithEmailAndPassword, signOut, type User } from "firebase/auth";
 import { addDoc, collection, doc, getDoc, getDocs, serverTimestamp, setDoc, updateDoc } from "firebase/firestore";
 import { ArrowRight, Award, BookOpen, Building2, CheckCircle2, ChevronDown, Globe2, GraduationCap, LockKeyhole, Menu, ShieldCheck, Sparkles, Trophy, Users, X } from "lucide-react";
