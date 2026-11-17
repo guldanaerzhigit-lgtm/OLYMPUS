@@ -162,7 +162,7 @@ function Dashboard({lang}:{lang:Lang}) {
   async function createOlympiad(e:React.FormEvent){
     e.preventDefault();if(!db)return;setMessage("");
     try{
-      await addDoc(collection(db,"olympiads"),{...olympiadForm,grade:Number(olympiadForm.grade),duration:Number(olympiadForm.duration),questionCount:0,status:"draft",createdBy:user?.uid||"",createdAt:serverTimestamp()});
+      await addDoc(collection(db,"olympiads"),{...olympiadForm,startDate:olympiadForm.startDate?new Date(olympiadForm.startDate).toISOString():"",grade:Number(olympiadForm.grade),duration:Number(olympiadForm.duration),questionCount:0,status:"draft",createdBy:user?.uid||"",createdAt:serverTimestamp()});
       setOlympiadForm({title:"",subject:"Математика",grade:"5",duration:"60",startDate:""});
       await reloadData();setMessage(kk?"Олимпиада жобасы сақталды.":"Черновик олимпиады сохранён.");
     }catch{setMessage(kk?"Олимпиаданы сақтау мүмкін болмады. Ережелерді тексеріңіз.":"Не удалось сохранить олимпиаду. Проверьте правила.");}
