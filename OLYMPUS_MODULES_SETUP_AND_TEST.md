@@ -82,4 +82,8 @@ Production Variables/Secrets ішінде бұрын орнатылған кел
 
 ## Build / acceptance status
 
-GitHub-қа код енгізілді. Осы ортада репозиторийді npm install/build жасап іске қосу мүмкін болмады, сондықтан TypeScript build пен production runtime әлі расталған жоқ. Cloudflare Deployment нәтижесі және жоғарыдағы толық сценарий сәтті өткеннен кейін ғана модульдерді production-ready деп санаңыз.
+- GitHub Actions workflow `Build OLYMPUS for Cloudflare Pages` сәтті аяқталды: `npm install` және `npm run build` — Success.
+- Build тексерілген commit: `c4b49390647425a76a54b3758919c0873009f0ea`.
+- [GitHub Actions build нәтижесі](https://github.com/guldanaerzhigit-lgtm/OLYMPUS/actions/runs/44151785316).
+- Бұл тек TypeScript/Vite build нәтижесі. Cloudflare Production жариялануы, Firebase Rules Publish және жоғарыдағы толық end-to-end тест әлі бөлек тексерілуі керек.
+- Модульдерді production-ready деп тек Cloudflare Production deployment сәтті өтіп, Firestore Rules жарияланып, толық тест сценарийі өткеннен кейін ғана санаңыз.
