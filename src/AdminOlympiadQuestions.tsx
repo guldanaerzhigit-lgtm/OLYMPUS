@@ -4,7 +4,7 @@ import { apiPost } from "./api";
 import { db } from "./firebase";
 
 type Olympiad = { id: string; title?: string; status?: string; questionCount?: number };
-export default function AdminOlympiadQuestions({ lang }: { lang: "kk" | "ru" }) {
+export default function AdminOlympiadQuestions({ lang, onChanged }: { lang: "kk" | "ru"; onChanged?: () => void | Promise<void> }) {
   const kk = lang === "kk";
   const [items, setItems] = useState<Olympiad[]>([]);
   const [selected, setSelected] = useState("");
@@ -31,6 +31,7 @@ export default function AdminOlympiadQuestions({ lang }: { lang: "kk" | "ru" }) 
       await apiPost("/api/admin/question", { olympiadId: selected, prompt: form.prompt, type: form.type, options, answer: form.answer.trim(), points: Number(form.points) });
       setForm(old => ({ ...old, prompt: "" }));
       await reload();
+      await onChanged?.();
       setMessage(kk ? "Сұрақ қосылды. Енді жариялауға болады." : "Вопрос добавлен. Теперь можно публиковать.");
     } catch (e) { setMessage(String((e as Error).message || e)); }
     finally { setBusy(false); }
