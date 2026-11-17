@@ -207,7 +207,7 @@ async function submitAttempt(token: string, olympiadId: string, answers: Record<
     details[question.id] = { answer: String(answers?.[question.id] ?? "").slice(0, 1000), correct: isCorrect, points: isCorrect ? points : 0 };
   }
   const percentage = maxScore ? Math.round(score / maxScore * 10000) / 100 : 0;
-  const serial = "OLY-" + new Date().getFullYear() + "-" + crypto.randomUUID().replace(/-/g, "").slice(0, 12).toUpperCase();
+  const serial = "OLY-" + new Date().getFullYear() + "-" + crypto.randomUUID().replace(/-/g, "").toUpperCase();
   const studentName = String(caller.profile.displayName || caller.email || "Оқушы");
   const result = { olympiadId, olympiadTitle: olympiad.title || "", subject: olympiad.subject || "", grade: olympiad.grade || "", studentUid: caller.uid, studentName, schoolId: caller.profile.schoolId || "", score, maxScore, percentage, correctCount, totalQuestions: questionRows.length, submittedAt: submitted, status: "verified", certificateSerial: serial };
   const certificate = { serial, studentUid: caller.uid, studentName, schoolId: caller.profile.schoolId || "", olympiadId, olympiadTitle: olympiad.title || "", subject: olympiad.subject || "", grade: olympiad.grade || "", score, maxScore, percentage, issuedAt: submitted, status: "issued" };
@@ -256,6 +256,31 @@ async function handleOlympiadPost(path: string, request: Request, body: any, tok
       if (resultDoc) history.push(docData(resultDoc));
     }
     return json({ history: history.sort((a, b) => String(b.submittedAt).localeCompare(String(a.submittedAt))) });
+  }
+  if (path === "/api/admin/analytics") {
+    if (caller.profile.role !== "super_admin") return fail("Super Admin only", 403);
+    const olympiads = await collectionDocs(token, "olympiads");
+    let results: any[] = [];
+    for (const olympiad of olympiads) {
+      const rows = await collectionDocs(token, "olympiads/" + olympiad.id + "/results");
+      results = results.concat(rows.map(row => ({ ...row, olympiadId: olympiad.id, olympiadTitle: olympiad.title || "" })));
+    }
+    const schools = await collectionDocs(token, "schools");
+    const sum = results.reduce((value, row) => value + Number(row.percentage || 0), 0);
+    const top = [...results].sort((a, b) => Number(b.percentage) - Number(a.percentage) || String(a.submittedAt).localeCompare(String(b.submittedAt))).slice(0, 10);
+    const subjects: Record<string, number> = {};
+    for (const row of results) subjects[String(row.subject || "Басқа")] = (subjects[String(row.subject || "Басқа")] || 0) + 1;
+    return json({
+      schools: schools.length,
+      olympiads: olympiads.length,
+      publishedOlympiads: olympiads.filter(item => item.status === "published").length,
+      archivedOlympiads: olympiads.filter(item => item.status === "archived").length,
+      totalParticipants: results.length,
+      averagePercentage: results.length ? Math.round(sum / results.length * 10) / 10 : 0,
+      activeSchools: schools.filter(item => item.status === "active").length,
+      subjects,
+      topParticipants: top.map((row, index) => ({ rank: index + 1, studentName: row.studentName, olympiadTitle: row.olympiadTitle, subject: row.subject, percentage: row.percentage, score: row.score, maxScore: row.maxScore }))
+    });
   }
   if (path === "/api/olympiad/leaderboard") {
     const olympiadId = String(body.olympiadId || "");
