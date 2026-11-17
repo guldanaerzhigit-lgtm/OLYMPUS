@@ -2,16 +2,19 @@ import { initializeApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 
+// OLYMPUS Firebase project configuration.
+// Firebase web config is public; protect data with Firebase Security Rules.
 const config = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-  appId: import.meta.env.VITE_FIREBASE_APP_ID
+  apiKey: "AIzaSyAI7Fj5a1fATW2HdUpVxcMgYSlmWHl6y3M",
+  authDomain: "olympus-4444e.firebaseapp.com",
+  projectId: "olympus-4444e",
+  storageBucket: "olympus-4444e.firebasestorage.app",
+  messagingSenderId: "632397919667",
+  appId: "1:632397919667:web:2e248402fb2295bd4987c6",
+  measurementId: "G-EM2T2FWJYG"
 };
 
-export const firebaseConfigured = Boolean(config.apiKey && config.authDomain && config.projectId && config.appId);
-export const firebaseApp = firebaseConfigured ? initializeApp(config) : null;
-export const auth = firebaseApp ? getAuth(firebaseApp) : null;
-export const db = firebaseApp ? getFirestore(firebaseApp) : null;
+export const firebaseConfigured = true;
+export const firebaseApp = initializeApp(config);
+export const auth = getAuth(firebaseApp);
+export const db = getFirestore(firebaseApp);
