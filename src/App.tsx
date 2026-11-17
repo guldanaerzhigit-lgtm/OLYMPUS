@@ -49,7 +49,7 @@ function Landing({lang,setLang}:{lang:Lang;setLang:(v:Lang)=>void}) {
 function Login({lang}:{lang:Lang}){const t=copy[lang];const [email,setEmail]=useState("");const [password,setPassword]=useState("");const [error,setError]=useState("");const [busy,setBusy]=useState(false);const navigate=useNavigate();async function submit(e:React.FormEvent){e.preventDefault();setError("");if(!auth){setError(t.noConfig);return;}setBusy(true);try{await signInWithEmailAndPassword(auth,email,password);navigate("/dashboard");}catch{setError(t.loginError);}finally{setBusy(false);}}return <div className="auth-page"><Link className="brand" to="/"><span className="brand-mark"><Trophy/></span><span>OLYMPUS<small>SCHOOL OLYMPIAD PLATFORM</small></span></Link><form className="auth-card" onSubmit={submit}><div className="feature-icon"><LockKeyhole/></div><h1>{t.loginTitle}</h1><p>{lang==="kk"?"Мектеп аккаунтыңыз арқылы кіріңіз":"Войдите с помощью аккаунта вашей школы"}</p><label>{t.email}<input type="email" required value={email} onChange={e=>setEmail(e.target.value)}/></label><label>{t.password}<input type="password" required value={password} onChange={e=>setPassword(e.target.value)}/></label>{error&&<p className="form-error">{error}</p>}<button className="btn btn-primary submit-btn" disabled={busy}>{busy?"…":t.enter}<ArrowRight size={17}/></button><Link className="back-link" to="/">← {lang==="kk"?"Басты бетке":"На главную"}</Link></form></div>}
 
 type SchoolApplication = { id: string; school?: string; email?: string; city?: string; contact?: string; status?: string };
-type SchoolRecord = { id: string; name?: string; city?: string; email?: string; status?: string };
+type SchoolRecord = { id: string; name?: string; city?: string; email?: string; contact?: string; status?: string; createdAt?: unknown };
 type OlympiadRecord = { id: string; title?: string; subject?: string; grade?: string; status?: string; duration?: number; startDate?: string };
 type InviteRecord = { id: string; email?: string; role?: string; schoolId?: string; status?: string };
 
@@ -68,8 +68,11 @@ function Dashboard({lang}:{lang:Lang}) {
   const [inviteForm,setInviteForm]=useState({email:"",schoolId:"",role:"school_admin"});
   const [manualSchoolForm,setManualSchoolForm]=useState({name:"",city:"",email:"",contact:""});
   const [showManualSchoolForm,setShowManualSchoolForm]=useState(false);
+  const [editingSchool,setEditingSchool]=useState<SchoolRecord|null>(null);
+  const [schoolSearch,setSchoolSearch]=useState("");
+  const [auditLogs,setAuditLogs]=useState<any[]>([]);
   const kk=lang==="kk";
-  const label=(kk?{overview:"Шолу",schools:"Мектептер",applications:"Өтінімдер",olympiads:"Олимпиадалар",invites:"Шақырулар"}:{overview:"Обзор",schools:"Школы",applications:"Заявки",olympiads:"Олимпиады",invites:"Приглашения"});
+  const label=(kk?{overview:"Шолу",schools:"Мектептер",applications:"Өтінімдер",olympiads:"Олимпиадалар",invites:"Шақырулар",stats:"Статистика",audit:"Әрекеттер тарихы"}:{overview:"Обзор",schools:"Школы",applications:"Заявки",olympiads:"Олимпиады",invites:"Приглашения",stats:"Статистика",audit:"Журнал действий"});
   async function reloadData(){
     if(!db)return;
     const [a,s,o,i]=await Promise.all([
@@ -82,6 +85,7 @@ function Dashboard({lang}:{lang:Lang}) {
     setSchools(s.docs.map(d=>({id:d.id,...d.data()} as SchoolRecord)));
     setOlympiads(o.docs.map(d=>({id:d.id,...d.data()} as OlympiadRecord)));
     setInvites(i.docs.map(d=>({id:d.id,...d.data()} as InviteRecord)));
+    try{const logs=await getDocs(collection(db,"auditLogs"));setAuditLogs(logs.docs.map(d=>({id:d.id,...d.data()})).sort((a:any,b:any)=>String(b.createdAt||"").localeCompare(String(a.createdAt||""))).slice(0,100));}catch{setAuditLogs([]);}
   }
   useEffect(()=>{
     if(!auth||!db){setLoading(false);return;}
@@ -112,6 +116,30 @@ function Dashboard({lang}:{lang:Lang}) {
     if(!db)return;setBusyId(a.id);setMessage("");
     try{await updateDoc(doc(db,"schoolApplications",a.id),{status:"rejected",reviewedAt:serverTimestamp()});await reloadData();}
     catch{setMessage(kk?"Өтінімді өзгерту мүмкін болмады.":"Не удалось обновить заявку.");}
+    finally{setBusyId("");}
+  }
+  async function writeAudit(action:string,school:SchoolRecord,details:Record<string,unknown>={}) {
+    if(!db)return;
+    await addDoc(collection(db,"auditLogs"),{action,schoolId:school.id,schoolName:school.name||"",actorUid:user?.uid||"",actorEmail:user?.email||"",details,createdAt:new Date().toISOString()});
+  }
+  async function saveSchoolEdit(e:React.FormEvent){
+    e.preventDefault();if(!db||!editingSchool)return;setBusyId(editingSchool.id);setMessage("");
+    try{
+      const payload={name:(editingSchool.name||"").trim(),city:(editingSchool.city||"").trim(),email:(editingSchool.email||"").trim().toLowerCase(),contact:(editingSchool.contact||"").trim()};
+      if(!payload.name)throw new Error(kk?"Мектеп атауы міндетті.":"Название школы обязательно.");
+      await updateDoc(doc(db,"schools",editingSchool.id),{...payload,updatedAt:serverTimestamp()});
+      await writeAudit("school_updated",editingSchool,{fields:Object.keys(payload)});
+      setEditingSchool(null);await reloadData();setMessage(kk?"Мектеп деректері жаңартылды.":"Данные школы обновлены.");
+    }catch(err){setMessage((kk?"Сақтау қатесі: ":"Ошибка сохранения: ")+String((err as Error).message||""));}
+    finally{setBusyId("");}
+  }
+  async function changeSchoolStatus(school:SchoolRecord,status:"active"|"suspended"|"archived"){
+    if(!db)return;
+    const action=status==="active"?"school_reactivated":status==="suspended"?"school_suspended":"school_archived";
+    const confirmed=window.confirm(status==="archived"?(kk?"Мектепті архивке жібересіз бе?":"Архивировать школу?"):status==="suspended"?(kk?"Мектепті уақытша бұғаттайсыз ба?":"Временно заблокировать школу?"):(kk?"Мектепті қайта белсендіресіз бе?":"Повторно активировать школу?"));
+    if(!confirmed)return;setBusyId(school.id);setMessage("");
+    try{await updateDoc(doc(db,"schools",school.id),{status,updatedAt:serverTimestamp()});await writeAudit(action,school,{previousStatus:school.status||"active",status});await reloadData();setMessage(kk?"Мектеп мәртебесі жаңартылды.":"Статус школы обновлён.");}
+    catch(err){setMessage((kk?"Әрекет орындалмады: ":"Не удалось выполнить действие: ")+String((err as Error).message||""));}
     finally{setBusyId("");}
   }
   async function createManualSchool(e:React.FormEvent){
@@ -162,7 +190,7 @@ function Dashboard({lang}:{lang:Lang}) {
       <div className="dashboard-stat"><strong>{pending.length}</strong><span>{kk?"Күтудегі өтінім":"Ожидают решения"}</span></div>
       <div className="dashboard-stat"><strong>{olympiads.length}</strong><span>{kk?"Олимпиадалар":"Олимпиады"}</span></div>
     </div>
-    <nav className="admin-tabs">{(["overview","schools","applications","olympiads","invites"] as const).map(k=><button key={k} className={tab===k?"active":""} onClick={()=>setTab(k)}>{label[k]}</button>)}</nav>
+    <nav className="admin-tabs">{(["overview","schools","applications","olympiads","invites","stats","audit"] as const).map(k=><button key={k} className={tab===k?"active":""} onClick={()=>setTab(k)}>{label[k]}</button>)}</nav>
     {message&&<p className="dashboard-message">{message}</p>}
     {tab==="overview"&&<section className="admin-grid">
       <article className="admin-module"><span className="section-kicker">01 · SCHOOLS</span><h2>{kk?"Мектептер":"Школы"}</h2><strong>{schools.length}</strong><p>{kk?"Тіркелген мектептер":"Зарегистрированные школы"}</p><button className="btn btn-primary" onClick={()=>setTab("schools")}>{kk?"Ашу":"Открыть"} <ArrowRight size={15}/></button></article>
@@ -171,8 +199,12 @@ function Dashboard({lang}:{lang:Lang}) {
     </section>}
     {tab==="schools"&&<section className="dashboard-panel"><div className="dashboard-panel-head"><div><h2>{kk?"Мектептер тізімі":"Список школ"}</h2><p>{kk?"Мақұлданған мектептердің орталық тізімі.":"Центральный список одобренных школ."}</p></div><button type="button" className="btn btn-primary" onClick={()=>setShowManualSchoolForm(v=>!v)}>{showManualSchoolForm?(kk?"Жабу":"Закрыть"):(kk?"+ Мектепті қолмен қосу":"+ Добавить школу вручную")}</button></div>
       {showManualSchoolForm&&<form className="admin-form" onSubmit={createManualSchool}><label>{kk?"Мектеп атауы *":"Название школы *"}<input required value={manualSchoolForm.name} onChange={e=>setManualSchoolForm({...manualSchoolForm,name:e.target.value})} placeholder={kk?"Мысалы: №1 мектеп":"Например: Школа №1"}/></label><label>{kk?"Қала / аудан":"Город / район"}<input value={manualSchoolForm.city} onChange={e=>setManualSchoolForm({...manualSchoolForm,city:e.target.value})}/></label><label>{kk?"Мектеп email-ы":"Email школы"}<input type="email" value={manualSchoolForm.email} onChange={e=>setManualSchoolForm({...manualSchoolForm,email:e.target.value})}/></label><label>{kk?"Байланыс тұлғасы":"Контактное лицо"}<input value={manualSchoolForm.contact} onChange={e=>setManualSchoolForm({...manualSchoolForm,contact:e.target.value})}/></label><button className="btn btn-primary" disabled={busyId==="manual-school"}>{busyId==="manual-school"?"…":(kk?"Мектепті тіркеу":"Зарегистрировать школу")} <ArrowRight size={15}/></button></form>}
-      {schools.length===0?<div className="empty-state">{kk?"Әзірге мектеп жоқ.":"Пока школ нет."}</div>:<div className="application-list">{schools.map(s=><article className="application-item" key={s.id}><div className="application-info"><span className="status-pill approved">{s.status||"active"}</span><h3>{s.name||"—"}</h3><p>{s.city||"—"} · {s.email||"—"}</p><small>ID: {s.id}</small></div></article>)}</div>}
+      <input className="school-search" value={schoolSearch} onChange={e=>setSchoolSearch(e.target.value)} placeholder={kk?"Мектеп атауы, қала немесе email бойынша іздеу":"Поиск по школе, городу или email"}/>
+      {editingSchool&&<form className="admin-form school-edit-form" onSubmit={saveSchoolEdit}><h3>{kk?"Мектепті өңдеу":"Редактировать школу"}</h3><label>{kk?"Мектеп атауы":"Название школы"}<input required value={editingSchool.name||""} onChange={e=>setEditingSchool({...editingSchool,name:e.target.value})}/></label><label>{kk?"Қала / аудан":"Город / район"}<input value={editingSchool.city||""} onChange={e=>setEditingSchool({...editingSchool,city:e.target.value})}/></label><label>Email<input type="email" value={editingSchool.email||""} onChange={e=>setEditingSchool({...editingSchool,email:e.target.value})}/></label><label>{kk?"Байланыс тұлғасы":"Контактное лицо"}<input value={editingSchool.contact||""} onChange={e=>setEditingSchool({...editingSchool,contact:e.target.value})}/></label><div className="application-actions"><button className="btn btn-primary" disabled={!!busyId}>{kk?"Сақтау":"Сохранить"}</button><button type="button" className="btn btn-ghost" onClick={()=>setEditingSchool(null)}>{kk?"Болдырмау":"Отмена"}</button></div></form>}
+      {schools.filter(s=>[s.name,s.city,s.email].some(v=>String(v||"").toLowerCase().includes(schoolSearch.toLowerCase()))).length===0?<div className="empty-state">{kk?"Мектеп табылмады.":"Школы не найдены."}</div>:<div className="application-list">{schools.filter(s=>[s.name,s.city,s.email].some(v=>String(v||"").toLowerCase().includes(schoolSearch.toLowerCase()))).map(s=><article className="application-item" key={s.id}><div className="application-info"><span className={"status-pill "+(s.status==="active"?"approved":s.status==="archived"?"rejected":"pending")}>{s.status||"active"}</span><h3>{s.name||"—"}</h3><p>{s.city||"—"} · {s.email||"—"}</p><small>ID: {s.id} · {invites.filter(i=>i.schoolId===s.id).length} {kk?"шақыру":"приглашений"}</small></div><div className="application-actions"><button className="btn btn-ghost" onClick={()=>setEditingSchool({...s})}>{kk?"Өңдеу":"Изменить"}</button>{s.status==="active"?<button className="btn btn-ghost" disabled={!!busyId} onClick={()=>changeSchoolStatus(s,"suspended")}>{kk?"Бұғаттау":"Блокировать"}</button>:s.status==="archived"?<button className="btn btn-primary" disabled={!!busyId} onClick={()=>changeSchoolStatus(s,"active")}>{kk?"Қайта ашу":"Восстановить"}</button>:<button className="btn btn-primary" disabled={!!busyId} onClick={()=>changeSchoolStatus(s,"active")}>{kk?"Белсендіру":"Активировать"}</button>}{s.status!=="archived"&&<button className="btn btn-ghost" disabled={!!busyId} onClick={()=>changeSchoolStatus(s,"archived")}>{kk?"Архивтеу":"В архив"}</button>}</div></article>)}</div>}
     </section>}
+    {tab==="stats"&&<section className="dashboard-panel"><div className="dashboard-panel-head"><div><h2>{kk?"Мектеп статистикасы":"Статистика школ"}</h2><p>{kk?"Мектептердің ағымдағы мәртебесі мен шақыру белсенділігі.":"Тек агрегатталған мектептік показатели."}</p></div></div><div className="admin-grid"><article className="admin-module"><h2>{kk?"Барлығы":"Всего"}</h2><strong>{schools.length}</strong></article><article className="admin-module"><h2>{kk?"Белсенді":"Активные"}</h2><strong>{schools.filter(s=>s.status==="active").length}</strong></article><article className="admin-module"><h2>{kk?"Бұғатталған":"Заблокированы"}</h2><strong>{schools.filter(s=>s.status==="suspended").length}</strong></article><article className="admin-module"><h2>{kk?"Архивте":"В архиве"}</h2><strong>{schools.filter(s=>s.status==="archived").length}</strong></article><article className="admin-module"><h2>{kk?"Шақырулар":"Приглашения"}</h2><strong>{invites.length}</strong></article></div><div className="application-list">{schools.map(s=><article className="application-item" key={s.id}><div className="application-info"><h3>{s.name}</h3><p>{s.city||"—"} · {s.status||"active"}</p></div><strong>{invites.filter(i=>i.schoolId===s.id).length} {kk?"шақыру":"приглашений"}</strong></article>)}</div></section>}
+    {tab==="audit"&&<section className="dashboard-panel"><div className="dashboard-panel-head"><div><h2>{kk?"Әрекеттер тарихы":"Журнал действий"}</h2><p>{kk?"Мектептерге қатысты соңғы 100 әкімшілік әрекет.":"Последние 100 административных действий со школами."}</p></div></div>{auditLogs.length===0?<div className="empty-state">{kk?"Әзірге әрекеттер тіркелмеген.":"Пока нет записей."}</div>:<div className="application-list">{auditLogs.map(log=><article className="application-item" key={log.id}><div className="application-info"><span className="status-pill">{log.action}</span><h3>{log.schoolName||log.schoolId}</h3><p>{log.actorEmail||log.actorUid} · {log.createdAt||"—"}</p></div></article>)}</div>}</section>}
     {tab==="applications"&&<section className="dashboard-panel"><div className="dashboard-panel-head"><div><h2>{kk?"Мектеп өтінімдері":"Заявки школ"}</h2><p>{kk?"Жаңа мектептерді қарап, мақұлдаңыз немесе қабылдамаңыз.":"Проверяйте заявки новых школ, одобряйте или отклоняйте их."}</p></div></div>
       {apps.length===0?<div className="empty-state">{kk?"Әзірге өтінімдер жоқ.":"Пока заявок нет."}</div>:<div className="application-list">{apps.map(a=><article className="application-item" key={a.id}><div className="application-info"><span className={"status-pill "+(a.status||"pending")}>{a.status==="approved"?(kk?"Мақұлданды":"Одобрена"):a.status==="rejected"?(kk?"Қабылданбады":"Отклонена"):(kk?"Күтуде":"На рассмотрении")}</span><h3>{a.school||"—"}</h3><p>{a.city||"—"} · {a.contact||"—"}</p><a href={"mailto:"+a.email}>{a.email}</a></div>{(a.status||"pending")==="pending"&&<div className="application-actions"><button className="btn btn-primary" disabled={!!busyId} onClick={()=>approve(a)}>{busyId===a.id?"…":(kk?"Мақұлдау":"Одобрить")}</button><button className="btn btn-ghost" disabled={!!busyId} onClick={()=>reject(a)}>{kk?"Қабылдамау":"Отклонить"}</button></div>}</article>)}</div>}
     </section>}
