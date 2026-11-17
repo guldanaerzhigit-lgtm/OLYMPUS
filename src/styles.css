@@ -68,3 +68,56 @@
 .application-actions .btn{white-space:nowrap}
 .status-pill.pending{background:#fff5df;color:#a56a0b}
 @media(max-width:760px){.school-edit-form h3{grid-column:auto}.application-actions{flex-wrap:wrap}}
+
+
+/* OLYMPUS online assessment */
+.test-panel .dashboard-panel-head{align-items:center;gap:18px}
+.question-card{display:block;margin:12px 0}
+.question-card .application-info h3{white-space:pre-wrap;line-height:1.6}
+.question-options{display:grid;gap:10px;margin-top:14px}
+.question-options label{display:flex;align-items:center;gap:10px;padding:12px 14px;border:1px solid #e6eaf2;border-radius:10px;cursor:pointer;color:#26324b}
+.question-options input{accent-color:#5b54d6;width:18px;height:18px}
+.question-answer{display:grid;gap:8px;margin-top:14px;font-size:13px;font-weight:700;color:#536079}
+.question-answer input{height:43px;border:1px solid #e2e6ef;border-radius:8px;padding:0 12px}
+.leaderboard-panel{margin-top:22px;padding-top:18px;border-top:1px solid #edf0f6}
+.result-panel{display:grid;gap:18px;margin-bottom:18px}
+.result-panel>.btn{width:max-content}
+.certificate-page{min-height:100vh;background:#f3f5fa;padding:24px;color:#17213d}
+.certificate-toolbar{display:flex;justify-content:space-between;gap:12px;max-width:1100px;margin:0 auto 18px}
+.certificate-sheet{max-width:1100px;margin:0 auto;background:#fff;padding:22px;box-shadow:0 15px 50px #1d2b4d18}
+.certificate-frame{min-height:680px;border:8px double #b89b56;padding:54px 64px;text-align:center;display:flex;flex-direction:column;align-items:center;justify-content:center;position:relative}
+.certificate-brand{display:flex;align-items:center;gap:12px;color:#424b79;font-weight:900;letter-spacing:2px;font-size:21px}
+.certificate-brand small{display:block;font-size:8px;letter-spacing:2px;margin-top:4px}
+.certificate-kicker{margin-top:36px;font-size:11px;letter-spacing:3px;color:#a18443}
+.certificate-frame h1{font-size:54px;letter-spacing:9px;color:#29345f;margin:14px 0}
+.certificate-subtitle{max-width:650px;color:#64708a;line-height:1.7}
+.certificate-frame h2{font-family:Georgia,serif;font-size:38px;color:#a18443;margin:25px 0 10px}
+.certificate-rule{height:1px;background:#c9ad70;width:65%;margin:0 auto 20px}
+.certificate-description{font-size:20px;font-weight:800;margin:0 0 8px}
+.certificate-meta{color:#6d7890}
+.certificate-score{display:flex;gap:22px;align-items:center;margin:14px 0 32px;color:#303b69}
+.certificate-score strong{font-size:24px}
+.certificate-score span{font-size:20px;font-weight:800;color:#a18443}
+.certificate-footer{width:100%;display:flex;justify-content:space-between;align-items:end;gap:16px;margin-top:14px;text-align:left}
+.certificate-footer>div{display:grid;gap:7px}
+.certificate-footer span{font-size:10px;color:#758099}
+.certificate-footer strong{font-size:12px}
+.certificate-seal{color:#a18443;justify-items:center}
+.certificate-verify{border-top:1px solid #e8dfcb;margin-top:28px;padding-top:12px;font-size:9px;color:#8891a4;overflow-wrap:anywhere}
+@media print{
+  @page{size:A4 landscape;margin:8mm}
+  body{background:#fff!important}
+  .certificate-page{padding:0;background:#fff;min-height:0}
+  .certificate-toolbar{display:none!important}
+  .certificate-sheet{max-width:none;margin:0;padding:0;box-shadow:none}
+  .certificate-frame{min-height:180mm;border-width:6px;padding:28px 48px;break-inside:avoid}
+  .certificate-frame h1{font-size:44px}
+}
+@media(max-width:700px){
+ .certificate-page{padding:10px}
+ .certificate-toolbar{flex-direction:column}
+ .certificate-frame{padding:28px 18px;min-height:520px}
+ .certificate-frame h1{font-size:36px;letter-spacing:5px}
+ .certificate-frame h2{font-size:26px}
+ .certificate-footer{flex-wrap:wrap}
+}
