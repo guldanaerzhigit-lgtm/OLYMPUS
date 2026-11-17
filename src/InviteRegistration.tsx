@@ -1,9 +1,8 @@
 import { useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { httpsCallable } from "firebase/functions";
 import { signInWithEmailAndPassword } from "firebase/auth";
 import { ArrowRight, LockKeyhole, Trophy } from "lucide-react";
-import { auth, functions } from "./firebase";
+import { auth } from "./firebase";
 
 type CompleteResult = { uid: string; email: string; role: string };
 export default function InviteRegistration({ lang }: { lang: "kk" | "ru" }) {
@@ -16,39 +15,23 @@ export default function InviteRegistration({ lang }: { lang: "kk" | "ru" }) {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const kk = lang === "kk";
-
   async function submit(e: React.FormEvent) {
-    e.preventDefault();
-    setError("");
-    if (!token) {
-      setError(kk ? "Шақыру сілтемесі жарамсыз." : "Ссылка-приглашение недействительна.");
-      return;
-    }
-    if (password.length < 8) {
-      setError(kk ? "Құпиясөз кемінде 8 таңбадан тұруы керек." : "Пароль должен содержать не менее 8 символов.");
-      return;
-    }
-    if (password !== confirmPassword) {
-      setError(kk ? "Құпиясөздер сәйкес келмейді." : "Пароли не совпадают.");
-      return;
-    }
+    e.preventDefault(); setError("");
+    if (!token) { setError(kk ? "Шақыру сілтемесі жарамсыз." : "Ссылка-приглашение недействительна."); return; }
+    if (password.length < 8 || password !== confirmPassword) { setError(kk ? "Құпиясөздерді тексеріңіз (кемінде 8 таңба)." : "Проверьте пароли (не менее 8 символов)."); return; }
     setBusy(true);
     try {
-      const complete = httpsCallable<{ token: string; displayName: string; password: string }, CompleteResult>(functions, "completeInviteRegistration");
-      const result = await complete({ token, displayName: displayName.trim(), password });
-      if (!auth || !result.data.email) throw new Error("Sign-in unavailable");
-      await signInWithEmailAndPassword(auth, result.data.email, password);
-      navigate(result.data.role === "school_admin" ? "/school" : result.data.role === "teacher" ? "/teacher" : "/student");
+      const response = await fetch("/api/register-invite", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ token, displayName: displayName.trim(), password }) });
+      const data = await response.json() as CompleteResult & { error?: string };
+      if (!response.ok) throw new Error(data.error || "Registration failed");
+      await signInWithEmailAndPassword(auth, data.email, password);
+      navigate(data.role === "school_admin" ? "/school" : data.role === "teacher" ? "/teacher" : "/student");
     } catch (err) {
-      const code = (err as { code?: string }).code || "";
-      if (code.includes("already-exists")) setError(kk ? "Бұл email бұрын тіркелген. Бұрынғы аккаунтпен кіріңіз немесе мектеп әкімшісіне хабарласыңыз." : "Этот email уже зарегистрирован. Войдите в существующий аккаунт или обратитесь к администратору школы.");
-      else if (code.includes("not-found") || code.includes("failed-precondition")) setError(kk ? "Шақыру табылмады, мерзімі өткен немесе бұрын қолданылған." : "Приглашение не найдено, истекло или уже использовано.");
-      else setError(kk ? "Тіркелу орындалмады. Сілтемені тексеріп, қайталап көріңіз." : "Не удалось зарегистрироваться. Проверьте ссылку и попробуйте ещё раз.");
-    } finally {
-      setBusy(false);
-    }
+      const msg = String((err as Error).message || "");
+      if (msg.toLowerCase().includes("already exists") || msg.includes("EMAIL_EXISTS")) setError(kk ? "Бұл email бұрын тіркелген. Бұрынғы аккаунтпен кіріңіз." : "Этот email уже зарегистрирован. Войдите в существующий аккаунт.");
+      else setError(kk ? "Тіркелу орындалмады. Шақыру сілтемесін тексеріңіз." : "Не удалось зарегистрироваться. Проверьте ссылку-приглашение.");
+    } finally { setBusy(false); }
   }
-
   return <div className="auth-page">
     <Link className="brand" to="/"><span className="brand-mark"><Trophy /></span><span>OLYMPUS<small>SCHOOL OLYMPIAD PLATFORM</small></span></Link>
     <form className="auth-card" onSubmit={submit}>
