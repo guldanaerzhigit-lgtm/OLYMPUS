@@ -45,14 +45,38 @@ function Landing({lang,setLang}:{lang:Lang;setLang:(v:Lang)=>void}) {
 function Login({lang}:{lang:Lang}){const t=copy[lang];const [email,setEmail]=useState("");const [password,setPassword]=useState("");const [error,setError]=useState("");const [busy,setBusy]=useState(false);const navigate=useNavigate();async function submit(e:React.FormEvent){e.preventDefault();setError("");if(!auth){setError(t.noConfig);return;}setBusy(true);try{await signInWithEmailAndPassword(auth,email,password);navigate("/dashboard");}catch{setError(t.loginError);}finally{setBusy(false);}}return <div className="auth-page"><Link className="brand" to="/"><span className="brand-mark"><Trophy/></span><span>OLYMPUS<small>SCHOOL OLYMPIAD PLATFORM</small></span></Link><form className="auth-card" onSubmit={submit}><div className="feature-icon"><LockKeyhole/></div><h1>{t.loginTitle}</h1><p>{lang==="kk"?"Мектеп аккаунтыңыз арқылы кіріңіз":"Войдите с помощью аккаунта вашей школы"}</p><label>{t.email}<input type="email" required value={email} onChange={e=>setEmail(e.target.value)}/></label><label>{t.password}<input type="password" required value={password} onChange={e=>setPassword(e.target.value)}/></label>{error&&<p className="form-error">{error}</p>}<button className="btn btn-primary submit-btn" disabled={busy}>{busy?"…":t.enter}<ArrowRight size={17}/></button><Link className="back-link" to="/">← {lang==="kk"?"Басты бетке":"На главную"}</Link></form></div>}
 
 type SchoolApplication = { id: string; school?: string; email?: string; city?: string; contact?: string; status?: string };
+type SchoolRecord = { id: string; name?: string; city?: string; email?: string; status?: string };
+type OlympiadRecord = { id: string; title?: string; subject?: string; grade?: string; status?: string; duration?: number; startDate?: string };
+type InviteRecord = { id: string; email?: string; role?: string; schoolId?: string; status?: string };
+
 function Dashboard({lang}:{lang:Lang}) {
   const [user,setUser]=useState<User|null>(null);
   const [role,setRole]=useState("");
   const [apps,setApps]=useState<SchoolApplication[]>([]);
+  const [schools,setSchools]=useState<SchoolRecord[]>([]);
+  const [olympiads,setOlympiads]=useState<OlympiadRecord[]>([]);
+  const [invites,setInvites]=useState<InviteRecord[]>([]);
+  const [tab,setTab]=useState("overview");
   const [loading,setLoading]=useState(true);
   const [message,setMessage]=useState("");
   const [busyId,setBusyId]=useState("");
+  const [olympiadForm,setOlympiadForm]=useState({title:"",subject:"Математика",grade:"5",duration:"60",startDate:""});
+  const [inviteForm,setInviteForm]=useState({email:"",schoolId:"",role:"school_admin"});
   const kk=lang==="kk";
+  const label=(kk?{overview:"Шолу",schools:"Мектептер",applications:"Өтінімдер",olympiads:"Олимпиадалар",invites:"Шақырулар"}:{overview:"Обзор",schools:"Школы",applications:"Заявки",olympiads:"Олимпиады",invites:"Приглашения"});
+  async function reloadData(){
+    if(!db)return;
+    const [a,s,o,i]=await Promise.all([
+      getDocs(collection(db,"schoolApplications")),
+      getDocs(collection(db,"schools")),
+      getDocs(collection(db,"olympiads")),
+      getDocs(collection(db,"invitations"))
+    ]);
+    setApps(a.docs.map(d=>({id:d.id,...d.data()} as SchoolApplication)));
+    setSchools(s.docs.map(d=>({id:d.id,...d.data()} as SchoolRecord)));
+    setOlympiads(o.docs.map(d=>({id:d.id,...d.data()} as OlympiadRecord)));
+    setInvites(i.docs.map(d=>({id:d.id,...d.data()} as InviteRecord)));
+  }
   useEffect(()=>{
     if(!auth||!db){setLoading(false);return;}
     const unsub=onAuthStateChanged(auth,async current=>{
@@ -62,43 +86,82 @@ function Dashboard({lang}:{lang:Lang}) {
         const profile=await getDoc(doc(db,"users",current.uid));
         const currentRole=profile.exists()?String(profile.data().role||""):"";
         setRole(currentRole);
-        if(currentRole==="super_admin"){
-          const snap=await getDocs(collection(db,"schoolApplications"));
-          setApps(snap.docs.map(d=>({id:d.id,...d.data()} as SchoolApplication)).sort((a,b)=>String(a.status||"").localeCompare(String(b.status||""))));
-        }
+        if(currentRole==="super_admin")await reloadData();
       }catch{setMessage(kk?"Деректерді жүктеу мүмкін болмады. Firestore ережелерін тексеріңіз.":"Не удалось загрузить данные. Проверьте правила Firestore.");}
       finally{setLoading(false);}
     });
     return ()=>unsub();
   },[kk]);
   async function approve(a:SchoolApplication){
-    if(!db)return;
-    setBusyId(a.id);setMessage("");
+    if(!db)return;setBusyId(a.id);setMessage("");
     try{
       const schoolRef=doc(collection(db,"schools"));
       await setDoc(schoolRef,{name:a.school||"",email:a.email||"",city:a.city||"",contact:a.contact||"",status:"active",createdAt:serverTimestamp(),approvedAt:serverTimestamp()});
       await updateDoc(doc(db,"schoolApplications",a.id),{status:"approved",schoolId:schoolRef.id,reviewedAt:serverTimestamp()});
-      setApps(old=>old.map(x=>x.id===a.id?{...x,status:"approved"}:x));
-      setMessage(kk?"Мектеп өтінімі мақұлданды. Мектеп құрылды.":"Заявка одобрена. Школа создана.");
+      await reloadData();setMessage(kk?"Мектеп өтінімі мақұлданды. Мектеп құрылды.":"Заявка одобрена. Школа создана.");
     }catch{setMessage(kk?"Мақұлдау орындалмады. Firestore ережелерін тексеріңіз.":"Не удалось одобрить заявку. Проверьте правила Firestore.");}
     finally{setBusyId("");}
   }
   async function reject(a:SchoolApplication){
     if(!db)return;setBusyId(a.id);setMessage("");
-    try{await updateDoc(doc(db,"schoolApplications",a.id),{status:"rejected",reviewedAt:serverTimestamp()});setApps(old=>old.map(x=>x.id===a.id?{...x,status:"rejected"}:x));}
+    try{await updateDoc(doc(db,"schoolApplications",a.id),{status:"rejected",reviewedAt:serverTimestamp()});await reloadData();}
     catch{setMessage(kk?"Өтінімді өзгерту мүмкін болмады.":"Не удалось обновить заявку.");}
     finally{setBusyId("");}
+  }
+  async function createOlympiad(e:React.FormEvent){
+    e.preventDefault();if(!db)return;setMessage("");
+    try{
+      await addDoc(collection(db,"olympiads"),{...olympiadForm,grade:Number(olympiadForm.grade),duration:Number(olympiadForm.duration),status:"draft",createdBy:user?.uid||"",createdAt:serverTimestamp()});
+      setOlympiadForm({title:"",subject:"Математика",grade:"5",duration:"60",startDate:""});
+      await reloadData();setMessage(kk?"Олимпиада жобасы сақталды.":"Черновик олимпиады сохранён.");
+    }catch{setMessage(kk?"Олимпиаданы сақтау мүмкін болмады. Ережелерді тексеріңіз.":"Не удалось сохранить олимпиаду. Проверьте правила.");}
+  }
+  async function publishOlympiad(o:OlympiadRecord){
+    if(!db)return;setBusyId(o.id);
+    try{await updateDoc(doc(db,"olympiads",o.id),{status:"published",publishedAt:serverTimestamp()});await reloadData();}
+    catch{setMessage(kk?"Жариялау мүмкін болмады.":"Не удалось опубликовать.");}
+    finally{setBusyId("");}
+  }
+  async function createInvite(e:React.FormEvent){
+    e.preventDefault();if(!db)return;setMessage("");
+    try{
+      await addDoc(collection(db,"invitations"),{email:inviteForm.email.trim().toLowerCase(),schoolId:inviteForm.schoolId,role:inviteForm.role,status:"pending",createdAt:serverTimestamp(),createdBy:user?.uid||""});
+      setInviteForm({email:"",schoolId:"",role:"school_admin"});await reloadData();
+      setMessage(kk?"Шақыру жазбасы жасалды. Нақты аккаунт ашу үшін серверлік шақыру қызметін қосу қажет.":"Запись приглашения создана. Для создания аккаунта и отправки письма нужен серверный сервис приглашений.");
+    }catch{setMessage(kk?"Шақыруды сақтау мүмкін болмады.":"Не удалось сохранить приглашение.");}
   }
   if(loading)return <div className="auth-page"><div className="auth-card">OLYMPUS · {kk?"Жүктелуде…":"Загрузка…"}</div></div>;
   if(!user)return <div className="auth-page"><div className="auth-card"><h1>{kk?"Жүйеге кіріңіз":"Войдите в систему"}</h1><Link className="btn btn-primary" to="/login">{kk?"Кіру":"Войти"}</Link></div></div>;
   if(role!=="super_admin")return <div className="auth-page"><div className="auth-card"><h1>{kk?"Қолжетімділік шектеулі":"Нет доступа"}</h1><p>{kk?"Бұл аккаунтқа Super Admin рөлі берілмеген.":"У этой учётной записи нет роли Super Admin."}</p><button className="btn btn-ghost" onClick={()=>signOut(auth!)}>{kk?"Шығу":"Выйти"}</button></div></div>;
   const pending=apps.filter(a=>(a.status||"pending")==="pending");
+  const activeSchools=schools.filter(s=>s.status==="active");
   return <div className="auth-page"><div className="dashboard-shell">
     <header className="dashboard-head"><Link className="brand" to="/"><span className="brand-mark"><Trophy/></span><span>OLYMPUS<small>SUPER ADMIN</small></span></Link><button className="btn btn-ghost" onClick={()=>auth&&signOut(auth)}>{kk?"Жүйеден шығу":"Выйти"}</button></header>
-    <div className="dashboard-title"><div><span className="section-kicker">OLYMPUS · CONTROL CENTER</span><h1>{kk?"Басқару панелі":"Панель управления"}</h1><p>{user.email}</p></div><div className="dashboard-stat"><strong>{apps.length}</strong><span>{kk?"Барлық өтінім":"Всего заявок"}</span></div><div className="dashboard-stat"><strong>{pending.length}</strong><span>{kk?"Күтудегі өтінім":"Ожидают решения"}</span></div></div>
+    <div className="dashboard-title"><div><span className="section-kicker">OLYMPUS · CONTROL CENTER</span><h1>{kk?"Басқару панелі":"Панель управления"}</h1><p>{user.email}</p></div>
+      <div className="dashboard-stat"><strong>{schools.length}</strong><span>{kk?"Мектептер":"Школы"}</span></div>
+      <div className="dashboard-stat"><strong>{pending.length}</strong><span>{kk?"Күтудегі өтінім":"Ожидают решения"}</span></div>
+      <div className="dashboard-stat"><strong>{olympiads.length}</strong><span>{kk?"Олимпиадалар":"Олимпиады"}</span></div>
+    </div>
+    <nav className="admin-tabs">{(["overview","schools","applications","olympiads","invites"] as const).map(k=><button key={k} className={tab===k?"active":""} onClick={()=>setTab(k)}>{label[k]}</button>)}</nav>
     {message&&<p className="dashboard-message">{message}</p>}
-    <section className="dashboard-panel"><div className="dashboard-panel-head"><div><h2>{kk?"Мектеп өтінімдері":"Заявки школ"}</h2><p>{kk?"Жаңа мектептерді қарап, мақұлдаңыз немесе қабылдамаңыз.":"Проверяйте заявки новых школ, одобряйте или отклоняйте их."}</p></div></div>
-    {apps.length===0?<div className="empty-state">{kk?"Әзірге өтінімдер жоқ.":"Пока заявок нет."}</div>:<div className="application-list">{apps.map(a=><article className="application-item" key={a.id}><div className="application-info"><span className={"status-pill "+(a.status||"pending")}>{a.status==="approved"?(kk?"Мақұлданды":"Одобрена"):a.status==="rejected"?(kk?"Қабылданбады":"Отклонена"):(kk?"Күтуде":"На рассмотрении")}</span><h3>{a.school||"—"}</h3><p>{a.city||"—"} · {a.contact||"—"}</p><a href={"mailto:"+a.email}>{a.email}</a></div>{(a.status||"pending")==="pending"&&<div className="application-actions"><button className="btn btn-primary" disabled={!!busyId} onClick={()=>approve(a)}>{busyId===a.id?(kk?"…":"…"):(kk?"Мақұлдау":"Одобрить")}</button><button className="btn btn-ghost" disabled={!!busyId} onClick={()=>reject(a)}>{kk?"Қабылдамау":"Отклонить"}</button></div>}</article>)}</div>}</section>
+    {tab==="overview"&&<section className="admin-grid">
+      <article className="admin-module"><span className="section-kicker">01 · SCHOOLS</span><h2>{kk?"Мектептер":"Школы"}</h2><strong>{schools.length}</strong><p>{kk?"Тіркелген мектептер":"Зарегистрированные школы"}</p><button className="btn btn-primary" onClick={()=>setTab("schools")}>{kk?"Ашу":"Открыть"} <ArrowRight size={15}/></button></article>
+      <article className="admin-module"><span className="section-kicker">02 · APPLICATIONS</span><h2>{kk?"Өтінімдер":"Заявки"}</h2><strong>{pending.length}</strong><p>{kk?"Әкімшінің шешімін күтуде":"Ожидают решения администратора"}</p><button className="btn btn-primary" onClick={()=>setTab("applications")}>{kk?"Қарау":"Проверить"} <ArrowRight size={15}/></button></article>
+      <article className="admin-module"><span className="section-kicker">03 · OLYMPIADS</span><h2>{kk?"Олимпиадалар":"Олимпиады"}</h2><strong>{olympiads.length}</strong><p>{kk?"Жасалған олимпиадалар":"Созданные олимпиады"}</p><button className="btn btn-primary" onClick={()=>setTab("olympiads")}>{kk?"Басқару":"Управлять"} <ArrowRight size={15}/></button></article>
+    </section>}
+    {tab==="schools"&&<section className="dashboard-panel"><div className="dashboard-panel-head"><div><h2>{kk?"Мектептер тізімі":"Список школ"}</h2><p>{kk?"Мақұлданған мектептердің орталық тізімі.":"Центральный список одобренных школ."}</p></div></div>
+      {schools.length===0?<div className="empty-state">{kk?"Әзірге мектеп жоқ.":"Пока школ нет."}</div>:<div className="application-list">{schools.map(s=><article className="application-item" key={s.id}><div className="application-info"><span className="status-pill approved">{s.status||"active"}</span><h3>{s.name||"—"}</h3><p>{s.city||"—"} · {s.email||"—"}</p><small>ID: {s.id}</small></div></article>)}</div>}
+    </section>}
+    {tab==="applications"&&<section className="dashboard-panel"><div className="dashboard-panel-head"><div><h2>{kk?"Мектеп өтінімдері":"Заявки школ"}</h2><p>{kk?"Жаңа мектептерді қарап, мақұлдаңыз немесе қабылдамаңыз.":"Проверяйте заявки новых школ, одобряйте или отклоняйте их."}</p></div></div>
+      {apps.length===0?<div className="empty-state">{kk?"Әзірге өтінімдер жоқ.":"Пока заявок нет."}</div>:<div className="application-list">{apps.map(a=><article className="application-item" key={a.id}><div className="application-info"><span className={"status-pill "+(a.status||"pending")}>{a.status==="approved"?(kk?"Мақұлданды":"Одобрена"):a.status==="rejected"?(kk?"Қабылданбады":"Отклонена"):(kk?"Күтуде":"На рассмотрении")}</span><h3>{a.school||"—"}</h3><p>{a.city||"—"} · {a.contact||"—"}</p><a href={"mailto:"+a.email}>{a.email}</a></div>{(a.status||"pending")==="pending"&&<div className="application-actions"><button className="btn btn-primary" disabled={!!busyId} onClick={()=>approve(a)}>{busyId===a.id?"…":(kk?"Мақұлдау":"Одобрить")}</button><button className="btn btn-ghost" disabled={!!busyId} onClick={()=>reject(a)}>{kk?"Қабылдамау":"Отклонить"}</button></div>}</article>)}</div>}
+    </section>}
+    {tab==="olympiads"&&<div className="admin-stack"><section className="dashboard-panel"><div className="dashboard-panel-head"><div><h2>{kk?"Жаңа олимпиада құру":"Создать олимпиаду"}</h2><p>{kk?"Алдымен жобаны сақтаңыз, содан кейін жариялауға болады.":"Сначала сохраните черновик, затем его можно опубликовать."}</p></div></div>
+      <form className="admin-form" onSubmit={createOlympiad}><label>{kk?"Олимпиада атауы":"Название олимпиады"}<input required value={olympiadForm.title} onChange={e=>setOlympiadForm({...olympiadForm,title:e.target.value})}/></label><label>{kk?"Пән":"Предмет"}<select value={olympiadForm.subject} onChange={e=>setOlympiadForm({...olympiadForm,subject:e.target.value})}>{["Математика","Қазақ тілі","Орыс тілі","Ағылшын тілі","Информатика","Физика","Химия","Биология","История Казахстана"].map(x=><option key={x}>{x}</option>)}</select></label><label>{kk?"Сынып":"Класс"}<select value={olympiadForm.grade} onChange={e=>setOlympiadForm({...olympiadForm,grade:e.target.value})}>{Array.from({length:11},(_,i)=>String(i+1)).map(x=><option key={x} value={x}>{x}</option>)}</select></label><label>{kk?"Ұзақтығы (минут)":"Длительность (минут)"}<input type="number" min="5" max="240" required value={olympiadForm.duration} onChange={e=>setOlympiadForm({...olympiadForm,duration:e.target.value})}/></label><label>{kk?"Өткізу күні":"Дата проведения"}<input type="datetime-local" value={olympiadForm.startDate} onChange={e=>setOlympiadForm({...olympiadForm,startDate:e.target.value})}/></label><button className="btn btn-primary">{kk?"Жобаны сақтау":"Сохранить черновик"} <ArrowRight size={15}/></button></form>
+    </section><section className="dashboard-panel"><div className="dashboard-panel-head"><div><h2>{kk?"Олимпиадалар тізімі":"Список олимпиад"}</h2></div></div>{olympiads.length===0?<div className="empty-state">{kk?"Әзірге олимпиада жоқ.":"Пока олимпиад нет."}</div>:<div className="application-list">{olympiads.map(o=><article className="application-item" key={o.id}><div className="application-info"><span className={"status-pill "+(o.status==="published"?"approved":"pending")}>{o.status||"draft"}</span><h3>{o.title}</h3><p>{o.subject} · {o.grade} {kk?"сынып":"класс"} · {o.duration} {kk?"минут":"мин."}</p><small>{o.startDate||""}</small></div>{o.status!=="published"&&<button className="btn btn-primary" disabled={!!busyId} onClick={()=>publishOlympiad(o)}>{kk?"Жариялау":"Опубликовать"}</button>}</article>)}</div>}</section></div>}
+    {tab==="invites"&&<div className="admin-stack"><section className="dashboard-panel"><div className="dashboard-panel-head"><div><h2>{kk?"Әкімші шақыруын дайындау":"Подготовить приглашение администратора"}</h2><p>{kk?"Бұл кезеңде шақыру дерегі сақталады; аккаунтты серверлік қызмет жасайды.":"На этом этапе сохраняется запись приглашения; аккаунт создаёт серверная служба."}</p></div></div>
+      <form className="admin-form" onSubmit={createInvite}><label>Email<input required type="email" value={inviteForm.email} onChange={e=>setInviteForm({...inviteForm,email:e.target.value})}/></label><label>{kk?"Мектеп":"Школа"}<select required value={inviteForm.schoolId} onChange={e=>setInviteForm({...inviteForm,schoolId:e.target.value})}><option value="">{kk?"Мектепті таңдаңыз":"Выберите школу"}</option>{schools.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select></label><label>{kk?"Рөл":"Роль"}<select value={inviteForm.role} onChange={e=>setInviteForm({...inviteForm,role:e.target.value})}><option value="school_admin">{kk?"Мектеп әкімшісі":"Администратор школы"}</option><option value="teacher">{kk?"Мұғалім":"Учитель"}</option></select></label><button className="btn btn-primary" disabled={!schools.length}>{kk?"Шақыру жазбасын сақтау":"Сохранить приглашение"} <ArrowRight size={15}/></button></form>
+      <p className="admin-notice">{kk?"Қауіпсіздік: рөлді беру және Firebase Auth аккаунтын ашу браузерден орындалмайды. Келесі серверлік кезеңде шақыруды тексеру, бір реттік токен және email жіберу қосылады.":"Безопасность: назначение роли и создание аккаунта Firebase Auth не выполняются из браузера. На следующем серверном этапе добавим проверку приглашения, одноразовый токен и отправку email."}</p>
+    </section><section className="dashboard-panel"><div className="dashboard-panel-head"><div><h2>{kk?"Шақырулар тарихы":"История приглашений"}</h2></div></div>{invites.length===0?<div className="empty-state">{kk?"Шақырулар жоқ.":"Приглашений пока нет."}</div>:<div className="application-list">{invites.map(i=><article className="application-item" key={i.id}><div className="application-info"><span className="status-pill">{i.status||"pending"}</span><h3>{i.email}</h3><p>{i.role} · {schools.find(s=>s.id===i.schoolId)?.name||i.schoolId}</p></div></article>)}</div>}</section></div>}
   </div></div>;
 }
 
